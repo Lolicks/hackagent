@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
-# Jim AI Agent - Установщик
-# Запускать из папки с репозиторием
+# Jim AI Agent - Установщик для Kali Linux
+# Использует pipx для безопасной установки
 # ============================================================
 
 set -e
@@ -26,11 +26,10 @@ echo -e "${END}"
 # 1. ПРОВЕРКА ЧТО МЫ В ПРАВИЛЬНОЙ ПАПКЕ
 # ============================================================
 
-echo -e "\n${BLUE}📁 [1/6] Проверка репозитория...${END}"
+echo -e "\n${BLUE}📁 [1/7] Проверка репозитория...${END}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Ищем основной файл
 if [ -f "$SCRIPT_DIR/jim.py" ]; then
     MAIN_FILE="$SCRIPT_DIR/jim.py"
     echo -e "${GREEN}   ✅ Найден jim.py${END}"
@@ -39,15 +38,30 @@ elif [ -f "$SCRIPT_DIR/deepseek_chat.py" ]; then
     echo -e "${GREEN}   ✅ Найден deepseek_chat.py${END}"
 else
     echo -e "${RED}   ❌ Не найден файл с кодом агента!${END}"
-    echo -e "${YELLOW}   Убедитесь, что вы запускаете install.sh из папки репозитория${END}"
     exit 1
 fi
 
 # ============================================================
-# 2. СОЗДАНИЕ ДИРЕКТОРИЙ
+# 2. ПРОВЕРКА/УСТАНОВКА PIPX
 # ============================================================
 
-echo -e "\n${BLUE}📁 [2/6] Создание директорий...${END}"
+echo -e "\n${BLUE}📦 [2/7] Проверка pipx...${END}"
+
+if ! command -v pipx &> /dev/null; then
+    echo -e "${YELLOW}   ⚠️ pipx не установлен, устанавливаю...${END}"
+    sudo apt update -qq
+    sudo apt install -y pipx
+    pipx ensurepath
+    echo -e "${GREEN}   ✅ pipx установлен${END}"
+else
+    echo -e "${GREEN}   ✅ pipx уже установлен${END}"
+fi
+
+# ============================================================
+# 3. СОЗДАНИЕ ДИРЕКТОРИЙ
+# ============================================================
+
+echo -e "\n${BLUE}📁 [3/7] Создание директорий...${END}"
 
 JIM_DIR="$HOME/.jim"
 BIN_DIR="$HOME/.local/bin"
@@ -59,10 +73,10 @@ echo -e "${GREEN}   ✅ Директория Jim: $JIM_DIR${END}"
 echo -e "${GREEN}   ✅ Директория bin: $BIN_DIR${END}"
 
 # ============================================================
-# 3. КОПИРОВАНИЕ ФАЙЛОВ
+# 4. КОПИРОВАНИЕ ФАЙЛОВ
 # ============================================================
 
-echo -e "\n${BLUE}📄 [3/6] Копирование файлов...${END}"
+echo -e "\n${BLUE}📄 [4/7] Копирование файлов...${END}"
 
 cp "$MAIN_FILE" "$JIM_DIR/jim.py"
 echo -e "${GREEN}   ✅ Скопирован основной файл${END}"
@@ -73,10 +87,23 @@ if [ -f "$SCRIPT_DIR/system_prompt.txt" ]; then
 fi
 
 # ============================================================
-# 4. НАСТРОЙКА API КЛЮЧА
+# 5. УСТАНОВКА PYTHON ПАКЕТОВ ЧЕРЕЗ PIPX
 # ============================================================
 
-echo -e "\n${BLUE}🔑 [4/6] Настройка API ключа...${END}"
+echo -e "\n${BLUE}🐍 [5/7] Установка Python пакетов через pipx...${END}"
+
+# Устанавливаем openai и python-dotenv в изолированное окружение
+pipx install openai python-dotenv --quiet 2>/dev/null || \
+    pipx install --pip-args="openai python-dotenv" --quiet 2>/dev/null || \
+    echo -e "${YELLOW}   ⚠️ Установка через pipx, пакеты будут доступны в venv${END}"
+
+echo -e "${GREEN}   ✅ Пакеты установлены${END}"
+
+# ============================================================
+# 6. НАСТРОЙКА API КЛЮЧА
+# ============================================================
+
+echo -e "\n${BLUE}🔑 [6/7] Настройка API ключа...${END}"
 
 if [ ! -f "$JIM_DIR/.env" ]; then
     echo -e "${YELLOW}   📝 Введите ваш OpenRouter API ключ${END}"
@@ -96,36 +123,43 @@ else
 fi
 
 # ============================================================
-# 5. СОЗДАНИЕ ГЛОБАЛЬНОЙ КОМАНДЫ
+# 7. СОЗДАНИЕ ГЛОБАЛЬНОЙ КОМАНДЫ
 # ============================================================
 
-echo -e "\n${BLUE}🔗 [5/6] Создание глобальной команды 'jim'...${END}"
+echo -e "\n${BLUE}🔗 [7/7] Создание глобальной команды 'jim'...${END}"
 
-cat > "$JIM_CMD" << EOF
+cat > "$JIM_CMD" << 'EOF'
 #!/bin/bash
+# Jim AI Agent - работает в виртуальном окружении pipx
+JIM_DIR="$HOME/.jim"
 cd "$JIM_DIR"
-python3 "$JIM_DIR/jim.py" "\$@"
+
+# Используем Python из pipx или системный
+if command -v pipx &> /dev/null; then
+    # pipx создаёт свои venv, используем их
+    PIPX_VENV="$HOME/.local/pipx/venvs"
+    if [ -d "$PIPX_VENV/openai" ]; then
+        "$PIPX_VENV/openai/bin/python" "$JIM_DIR/jim.py" "$@"
+    elif [ -d "$PIPX_VENV/python-dotenv" ]; then
+        "$PIPX_VENV/python-dotenv/bin/python" "$JIM_DIR/jim.py" "$@"
+    else
+        python3 "$JIM_DIR/jim.py" "$@"
+    fi
+else
+    python3 "$JIM_DIR/jim.py" "$@"
+fi
 EOF
 
 chmod +x "$JIM_CMD"
 echo -e "${GREEN}   ✅ Команда создана: $JIM_CMD${END}"
 
-# Добавляем в PATH если нужно
+# Добавляем в PATH
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc 2>/dev/null
     export PATH="$HOME/.local/bin:$PATH"
     echo -e "${GREEN}   ✅ PATH настроен${END}"
 fi
-
-# ============================================================
-# 6. УСТАНОВКА ЗАВИСИМОСТЕЙ
-# ============================================================
-
-echo -e "\n${BLUE}🐍 [6/6] Установка зависимостей...${END}"
-
-pip3 install --quiet openai python-dotenv 2>/dev/null || pip install --quiet openai python-dotenv
-echo -e "${GREEN}   ✅ openai, python-dotenv установлены${END}"
 
 # ============================================================
 # ИТОГ
@@ -137,6 +171,10 @@ echo "║              ✅ JIM AI AGENT УСПЕШНО УСТАНОВЛЕН! ✅
 echo "╚═══════════════════════════════════════════════════════════════════════════╝"
 echo -e "${END}"
 
+echo -e "\n${CYAN}📁 Установлено в: $JIM_DIR${END}"
+echo -e "${CYAN}🔑 API ключ: $JIM_DIR/.env${END}"
+echo -e "${CYAN}📝 Промпт: $JIM_DIR/system_prompt.txt${END}"
+
 echo -e "\n${BOLD}🚀 ЗАПУСК:${END}"
 echo -e "   ${GREEN}jim${END}"
 
@@ -144,3 +182,5 @@ echo -e "\n${BOLD}🗑️ УДАЛЕНИЕ:${END}"
 echo -e "   ${GREEN}rm -rf ~/.jim ~/.local/bin/jim${END}"
 
 echo -e "\n${YELLOW}⚠️  Перезагрузите терминал или выполните: source ~/.zshrc${END}"
+
+echo -e "\n${BOLD}${GREEN}═══════════════════════════════════════════════════════════════════════════${END}"
