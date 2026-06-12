@@ -375,26 +375,32 @@ def check_api_key():
 # ============================================================
 
 def get_nmap_flags(context: str) -> str:
-    if "быстрый" in context or "quick" in context:
+    context_lower = context.lower()
+    if "быстрый" in context_lower or "quick" in context_lower:
         return "-F --open"
-    elif "все порты" in context or "full" in context:
+    elif "все порты" in context_lower or "full" in context_lower or "all" in context_lower:
         return "-p- --open"
-    elif "агрессивный" in context or "aggressive" in context:
+    elif "агрессивный" in context_lower or "aggressive" in context_lower or "интенсив" in context_lower:
         return "-sV -sC -O -A"
-    elif "тихий" in context or "stealth" in context:
+    elif "тихий" in context_lower or "stealth" in context_lower or "скрыт" in context_lower:
         return "-sS -Pn -T2 -f"
     else:
         return "-sV --open"
 
 def get_sqlmap_flags(context: str) -> str:
-    if "быстрый" in context or "quick" in context:
+    context_lower = context.lower()
+    if "быстрый" in context_lower or "quick" in context_lower:
         return "--batch --current-db --level=1"
-    elif "полный" in context or "full" in context:
+    elif "полный" in context_lower or "full" in context_lower or "agressive" in context_lower or "все" in context_lower:
         return "--batch --dbs --tables --level=3 --risk=2"
-    elif "waf" in context:
+    elif "waf" in context_lower or "защита" in context_lower or "брандмауэр" in context_lower:
         return "--batch --dbs --level=3 --random-agent --tamper=space2comment,charencode"
-    elif "тихий" in context or "stealth" in context:
+    elif "тихий" in context_lower or "stealth" in context_lower or "медленно" in context_lower:
         return "--batch --dbs --delay=5 --random-agent"
+    elif "blind" in context_lower or "time-based" in context_lower or "time based" in context_lower:
+        return "--batch --dbs --technique=T --level=2"
+    elif "error" in context_lower or "ошибк" in context_lower:
+        return "--batch --dbs --technique=E --level=1"
     else:
         return "--batch --dbs --level=1"
 
@@ -598,6 +604,33 @@ def run_nikto(target: str) -> Dict:
 
 class IntentAnalyzer:
     @staticmethod
+    def parse_json_response(text: str) -> Dict:
+        candidates = []
+        try:
+            candidates.append(json.loads(text))
+        except Exception:
+            pass
+
+        match = re.search(r'\{.*\}', text, flags=re.S)
+        if match:
+            try:
+                candidates.append(json.loads(match.group(0)))
+            except Exception:
+                pass
+
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                return {
+                    "intent": candidate.get("intent", "unknown"),
+                    "target": candidate.get("target"),
+                    "has_params": bool(candidate.get("has_params")),
+                    "tools": candidate.get("tools", []),
+                    "context_keywords": candidate.get("context_keywords", ""),
+                    "explanation": candidate.get("explanation", "")
+                }
+        return {}
+
+    @staticmethod
     def analyze(user_input: str, context_targets: List[str]) -> Dict:
         user_lower = user_input.lower()
         
@@ -610,13 +643,20 @@ class IntentAnalyzer:
             "explanation": ""
         }
         
-        # Извлечение URL
-        url_pattern = r'https?://[^\s]+|[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}(?:/\S*)?'
-        urls = re.findall(url_pattern, user_input)
-        
+        # Извлечение цели: URL, домен, IP
+        url_patterns = [
+            r'https?://[^\s]+' ,
+            r'\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:/[^\s]*)?\b',
+            r'\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,6}(?:/[^\s]*)?\b'
+        ]
+        urls = []
+        for pattern in url_patterns:
+            urls.extend(re.findall(pattern, user_input))
+        urls = [u.rstrip('.,;!') for u in urls]
+
         if urls:
             result["target"] = urls[0]
-            if not result["target"].startswith("http"):
+            if not result["target"].startswith("http") and not re.match(r'\d+\.\d+\.\d+\.\d+', result["target"]):
                 result["target"] = "http://" + result["target"]
             result["has_params"] = "?" in result["target"] and "=" in result["target"]
         
@@ -625,27 +665,27 @@ class IntentAnalyzer:
             result["target"] = context_targets[-1]
         
         # Анализ намерения
-        if any(word in user_lower for word in ['sql', 'инъекц', 'sqlmap', 'проверь sql', 'найди sql']):
+        if any(word in user_lower for word in ['sql', 'инъекц', 'sqlmap', 'проверь sql', 'найди sql', 'sql-инъекц']):
             result["intent"] = "sql_injection"
             result["tools"].append("sqlmap")
             result["explanation"] = "Проверка SQL-инъекций"
         
-        elif any(word in user_lower for word in ['порты', 'nmap', 'скан портов']):
+        elif any(word in user_lower for word in ['порты', 'nmap', 'скан портов', 'сканируй порты', 'сканер портов']):
             result["intent"] = "port_scan"
             result["tools"].append("nmap")
             result["explanation"] = "Сканирование портов"
         
-        elif any(word in user_lower for word in ['директор', 'gobuster', 'скрытые пути']):
+        elif any(word in user_lower for word in ['директор', 'gobuster', 'скрытые пути', 'директории', 'find directories', 'список директорий']):
             result["intent"] = "directory_scan"
             result["tools"].append("gobuster")
             result["explanation"] = "Поиск директорий"
         
-        elif any(word in user_lower for word in ['уязвим', 'nikto', 'проверь сайт']):
+        elif any(word in user_lower for word in ['уязвим', 'nikto', 'проверь сайт', 'проверь на уязвимости', 'пентест', 'аудит', 'ищи уязвимости']):
             result["intent"] = "web_vulnerability"
             result["tools"].append("nikto")
             result["explanation"] = "Проверка веб-уязвимостей"
         
-        elif any(word in user_lower for word in ['просканируй', 'проверь', 'протестируй']):
+        elif any(word in user_lower for word in ['просканируй', 'проверь', 'протестируй', 'посмотри', 'анализ', 'оцен', 'аудит', 'сделай аудит', 'посмотри сайт', 'проведи проверку']):
             result["intent"] = "general_scan"
             result["tools"].append("whatweb")
             result["explanation"] = "Общее сканирование"
@@ -655,9 +695,20 @@ class IntentAnalyzer:
         
         # Добавляем sqlmap, только если пользователь явно запрашивал SQL и URL подходит
         if (result["has_params"] and not is_admin_path(result["target"]) and not is_static_file(result["target"])):
-            if any(word in user_lower for word in ['sql', 'инъекц', 'sqlmap', 'проверь sql', 'найди sql']):
+            if any(word in user_lower for word in ['sql', 'инъекц', 'sqlmap', 'проверь sql', 'найди sql', 'sql-инъекц']):
                 if "sqlmap" not in result["tools"]:
                     result["tools"].insert(0, "sqlmap")
+
+        # Если цель определена, но инструмент не выбран, выберем разумное поведение
+        if result["target"] and not result["tools"]:
+            if re.match(r'\d{1,3}(?:\.\d{1,3}){3}', result["target"]):
+                result["intent"] = "port_scan"
+                result["tools"].append("nmap")
+                result["explanation"] = "Сканирование портов по IP"
+            else:
+                result["intent"] = "general_scan"
+                result["tools"].append("whatweb")
+                result["explanation"] = "Общее сканирование"
         
         # Извлекаем контекстные ключевые слова для флагов
         keywords = []
@@ -740,7 +791,84 @@ class JimAgent:
             base_url="https://openrouter.ai/api/v1",
         )
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    
+
+    def ask_chat(self, user_input: str) -> str:
+        if not self.client:
+            return "🤖 Я пока не могу ответить на общие вопросы, задайте команду сканирования."
+
+        try:
+            self.messages.append({"role": "user", "content": user_input})
+            response = self.client.chat.completions.create(
+                model="deepseek/deepseek-v4-flash",
+                messages=self.messages,
+                max_tokens=250,
+                temperature=0.7
+            )
+            text = response.choices[0].message.content.strip()
+            self.messages.append({"role": "assistant", "content": text})
+            return text
+        except Exception as e:
+            return f"❌ Ошибка чата: {str(e)[:100]}"
+
+    def analyze_intent(self, user_input: str) -> Dict[str, Any]:
+        if not self.client:
+            return IntentAnalyzer.analyze(user_input, self.context_targets)
+
+        system_text = (
+            "Ты — интеллектуальный пентест-ассистент на DeepSeek. "
+            "Анализируешь естественный язык, ошибки, URL и решаешь какие инструменты запускать. "
+            "\n"
+            "ИНСТРУМЕНТЫ И СЦЕНАРИИ:\n"
+            "1. SQL ошибка (Error 1064, syntax error, injection) + параметры в URL → sqlmap\n"
+            "2. IP адрес → nmap\n"
+            "3. Домен/URL без параметров → whatweb (определение технологий)\n"
+            "4. Параметры в URL → sqlmap (по умолчанию)\n"
+            "5. Ошибка 403/401 + админка (/admin, /login) → nikto\n"
+            "6. Полный аудит сайта → whatweb + nikto\n"
+            "\n"
+            "ФЛАГИ:\n"
+            "sqlmap: --batch --dbs для быстрой проверки, --random-agent для WAF, --level=3 для полной\n"
+            "nmap: -sV --open для стандартного, -p- для всех портов, -sS для скрытого сканирования\n"
+            "whatweb: базовые флаги, определение технологий\n"
+            "nikto: -h target для сайта\n"
+            "\n"
+            "Возвращай ТОЛЬКО JSON без текста: "
+            "{\"intent\": \"...\", \"target\": \"...\", \"has_params\": true/false, \"tools\": [...], \"explanation\": \"...\", \"context_keywords\": \"...\"}"
+        )
+        
+        target_context = ""
+        if self.context_targets:
+            target_context = f"\nСохранённые цели из истории: {', '.join(self.context_targets[-3:])}"
+        
+        prompt = (
+            f"Запрос пользователя:\n{user_input}{target_context}\n"
+            f"\nПроанализируй:\n"
+            f"1. Есть ли в запросе ошибка (SQL, HTTP, сеть)?\n"
+            f"2. Есть ли URL или IP адрес?\n"
+            f"3. Какой инструмент нужен?\n"
+            f"4. Какие флаги подходят для этой ошибки/цели?\n"
+            f"\nВозвращай JSON с полями: intent, target, has_params, tools, explanation, context_keywords"
+        )
+
+        try:
+            response = self.client.chat.completions.create(
+                model="deepseek/deepseek-v4-flash",
+                messages=[
+                    {"role": "system", "content": system_text},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=300,
+                temperature=0.0
+            )
+            text = response.choices[0].message.content.strip()
+            parsed = IntentAnalyzer.parse_json_response(text)
+            if parsed and parsed.get("tools"):
+                return parsed
+        except Exception:
+            pass
+
+        return IntentAnalyzer.analyze(user_input, self.context_targets)
+
     def process(self, user_input: str) -> str:
         if user_input.startswith('/'):
             return self._handle_command(user_input)
@@ -751,30 +879,17 @@ class JimAgent:
             UI.info(f"Запускаю sqlmap на {self.context_targets[-1]}")
         
         UI.thinking("Анализирую ваш запрос...", 0.3)
+        user_lower = user_input.lower()
         
-        intent = IntentAnalyzer.analyze(user_input, self.context_targets)
+        intent = self.analyze_intent(user_input)
         
         # Сохраняем цель
-        if intent["target"] and intent["target"] not in self.context_targets:
+        if intent.get("target") and intent["target"] not in self.context_targets:
             self.context_targets.append(intent["target"])
             save_context_targets(self.context_targets)
         
-        if not intent["target"]:
-            return """
-🔍 Не могу определить цель.
-
-💡 Укажите:
-   • URL: example.com/page?id=1
-   • IP: 192.168.1.1
-   • Или используйте сохранённые цели: /context
-
-Примеры:
-   • "проверь example.com/page?id=1 на SQL"
-   • "найди открытые порты на 192.168.1.1"
-"""
-        
-        if not intent["tools"]:
-            return f"❓ Не понял, что делать с {intent['target']}. Уточните: проверка SQL, порты, директории?"
+        if not intent.get("target") or not intent.get("tools"):
+            return self.ask_chat(user_input)
         
         # Создаём сессию
         self.session = Session(intent["target"])
