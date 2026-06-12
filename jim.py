@@ -16,8 +16,8 @@
 ║                        ██║  ██║███████╗  ███████╗██║ ╚████║   ██║                            ║
 ║                        ╚═╝  ╚═╝╚══════╝  ╚══════╝╚═╝  ╚═══╝   ╚═╝                            ║
 ║                                                                                              ║
-║                         🤖 JIM - AI PENTESTING ASSISTANT 🤖                                   ║
-║                                   v2.0.0 | The Smart Agent                                   ║
+║                         🤖 JIM - AI АССИСТЕНТ ДЛЯ ПЕНТЕСТА 🤖                                 ║
+║                                   v2.0.0 | Умный агент                                        ║
 ║                                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════════════════════╝
 """
@@ -63,7 +63,7 @@ VERSION = "2.0.0"
 
 def update_jim():
     print("\n" + "="*70)
-    print(" 🔄 JIM UPDATER ".center(70, "="))
+    print(" 🔄 ОБНОВЛЕНИЕ JIM ".center(70, "="))
     print("="*70 + "\n")
     jim_dir = os.path.expanduser("~/.jim")
     repo_url = "https://github.com/Lolicks/hackagent.git"
@@ -72,16 +72,16 @@ def update_jim():
     try:
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
-        print(" 📦 Cloning repository...")
+        print(" 📦 Загрузка репозитория...")
         subprocess.run(["git", "clone", "--depth", "1", repo_url, temp_dir], check=True, capture_output=True)
-        print(" 📄 Updating files...")
+        print(" 📄 Обновление файлов...")
         shutil.copy2(f"{temp_dir}/jim.py", f"{jim_dir}/jim.py")
         shutil.copy2(f"{temp_dir}/system_prompt.txt", f"{jim_dir}/")
         shutil.rmtree(temp_dir)
-        print("\n ✅ Update completed successfully!")
+        print("\n ✅ Обновление завершено успешно!")
         return True
     except Exception as e:
-        print(f" ❌ Update failed: {e}")
+        print(f" ❌ Ошибка обновления: {e}")
         return False
 
 # Обработка аргументов командной строки
@@ -97,20 +97,20 @@ for arg in args:
     elif arg in ["-h", "--help"]:
         print("""
 ╔════════════════════════════════════════════════════════════════════╗
-║                         JIM - HELP MENU                            ║
+║                         JIM - СПРАВКА                              ║
 ╠════════════════════════════════════════════════════════════════════╣
 ║                                                                    ║
-║  Usage:                                                           ║
-║    jim                              → Interactive mode             ║
-║    jim -a, --auto "target"          → Autonomous mode              ║
-║    jim --dry-run "target"           → Preview what would happen    ║
-║    jim --profile stealth|aggressive → Set default profile          ║
-║    jim -h, --help                   → Show this help               ║
-║    jim -v, --version                → Show version                 ║
-║    jim -u, --update                 → Update from GitHub           ║
+║  Использование:                                                    ║
+║    jim                              → Интерактивный режим          ║
+║    jim -a, --auto "цель"            → Автономный режим             ║
+║    jim --dry-run "цель"             → Показать план без выполнения ║
+║    jim --profile stealth|aggressive → Выбрать профиль              ║
+║    jim -h, --help                   → Показать справку             ║
+║    jim -v, --version                → Показать версию              ║
+║    jim -u, --update                 → Обновить из GitHub           ║
 ║                                                                    ║
-║  Interactive Commands:                                            ║
-║    status, stop, skip, redo, report, save, history, reset, help    ║
+║  Интерактивные команды:                                            ║
+║    status, stop, report, save, history, reset, help               ║
 ║                                                                    ║
 ╚════════════════════════════════════════════════════════════════════╝
 """)
@@ -309,104 +309,104 @@ ensure_directories()
 
 def get_nmap_flags(target: str, context: str = "", profile: str = "normal") -> Tuple[str, str]:
     flags = "-sV --open"
-    explanation = "Standard port scan with service version detection"
+    explanation = "Стандартное сканирование портов с определением версий"
     
     if "все порты" in context.lower() or "full" in context.lower():
         flags = "-sV -p- --open --min-rate=1000"
-        explanation = "Full port scan (1-65535) with rate limiting"
+        explanation = "Полное сканирование всех портов (1-65535)"
     elif "быстрый" in context.lower() or "quick" in context.lower():
         flags = "-F --open"
-        explanation = "Quick scan (top 100 ports only)"
+        explanation = "Быстрое сканирование (только топ-100 портов)"
     elif "агрессивный" in context.lower() or "aggressive" in context.lower():
         flags = "-sV -sC -O --open --version-intensity=9"
-        explanation = "Aggressive scan: versions, scripts, OS detection"
+        explanation = "Агрессивное сканирование: версии, скрипты, ОС"
     elif "udp" in context.lower():
         flags = "-sU --open"
-        explanation = "UDP port scan"
+        explanation = "Сканирование UDP портов"
     elif profile == "stealth":
         flags = "-sS -Pn -T2 -f --data-length=200 --randomize-hosts --spoof-mac 0"
-        explanation = "Stealth mode: SYN scan, no ping, slow timing, fragmentation"
+        explanation = "Скрытый режим: SYN-сканирование, без пинга, фрагментация"
     elif profile == "aggressive":
         flags = "-sV -sC -O -A -T4 -p-"
-        explanation = "Aggressive profile: all ports, OS, versions, traceroute"
+        explanation = "Максимально агрессивный профиль"
     
     return flags, explanation
 
 def get_sqlmap_flags(url: str, context: str = "", profile: str = "normal") -> Tuple[str, str]:
     flags = "--batch --dbs --level=1"
-    explanation = "Standard SQL injection scan, database enumeration"
+    explanation = "Стандартная проверка SQL-инъекций, перечисление БД"
     
     if "полный" in context.lower() or "full" in context.lower():
         flags = "--batch --dbs --tables --level=3 --risk=2"
-        explanation = "Full enumeration: databases, tables, columns"
+        explanation = "Полное сканирование: базы данных, таблицы, колонки"
     elif "быстрый" in context.lower() or "quick" in context.lower():
         flags = "--batch --current-db --level=1"
-        explanation = "Quick scan: current database only"
+        explanation = "Быстрая проверка: только текущая БД"
     elif "os-shell" in context.lower():
         flags = "--batch --os-shell"
-        explanation = "DANGEROUS: Attempt OS shell access"
+        explanation = "ОПАСНО: попытка получить доступ к ОС"
     elif "waf" in context.lower():
         flags = "--batch --dbs --level=3 --risk=2 --random-agent --tamper=space2comment,charencode"
-        explanation = "WAF bypass mode with tamper scripts"
+        explanation = "Режим обхода WAF"
     elif profile == "stealth":
         flags = "--batch --dbs --level=1 --delay=5 --random-agent --tor --check-tor"
-        explanation = "Stealth mode: delays, Tor, random User-Agent"
+        explanation = "Скрытый режим: задержки, Tor"
     elif profile == "aggressive":
         flags = "--batch --dbs --tables --level=5 --risk=3 --threads=10"
-        explanation = "Aggressive mode: high level/risk, multi-threaded"
+        explanation = "Агрессивный режим: высокий уровень/риск"
     
     return flags, explanation
 
 def get_gobuster_flags(url: str, context: str = "", profile: str = "normal") -> Tuple[str, str]:
     wordlist = "/usr/share/wordlists/dirb/common.txt"
     flags = f"dir -u {url} -w {wordlist}"
-    explanation = "Directory brute-force with common wordlist"
+    explanation = "Перебор директорий со стандартным словарём"
     
     if "большой" in context.lower() or "big" in context.lower():
         wordlist = "/usr/share/wordlists/dirb/big.txt"
         flags = f"dir -u {url} -w {wordlist}"
-        explanation = "Large wordlist mode (big.txt)"
+        explanation = "Режим большого словаря (big.txt)"
     elif "расширение" in context.lower() or "extension" in context.lower():
         flags = f"dir -u {url} -w {wordlist} -x php,txt,html,asp,aspx,js,css,json,xml,bak,old,sql"
-        explanation = "Extension search mode"
+        explanation = "Поиск с расширениями файлов"
     elif profile == "stealth":
         flags = f"dir -u {url} -w {wordlist} -t 10 --delay 2"
-        explanation = "Stealth mode: slow requests, low threads"
+        explanation = "Скрытый режим: медленные запросы"
     elif profile == "aggressive":
         flags = f"dir -u {url} -w {wordlist} -t 50"
-        explanation = "Aggressive mode: high thread count"
+        explanation = "Агрессивный режим: много потоков"
     
     return flags, explanation
 
 def get_nikto_flags(target: str, context: str = "", profile: str = "normal") -> Tuple[str, str]:
     flags = f"-h {target}"
-    explanation = "Standard web vulnerability scan"
+    explanation = "Стандартное сканирование веб-уязвимостей"
     
     if "ssl" in context.lower() or "https" in context.lower():
         flags = f"-h {target} -ssl"
-        explanation = "SSL/HTTPS mode"
+        explanation = "Режим SSL/HTTPS"
     elif "агрессивный" in context.lower() or "aggressive" in context.lower():
         flags = f"-h {target} -maxtime=600 -Tuning=4"
-        explanation = "Aggressive scan: longer timeout, specific tuning"
+        explanation = "Агрессивное сканирование"
     elif profile == "stealth":
         flags = f"-h {target} -delay 5 -nossl"
-        explanation = "Stealth mode: request delays"
+        explanation = "Скрытый режим: задержки между запросами"
     
     return flags, explanation
 
 def get_whatweb_flags(target: str, context: str = "", profile: str = "normal") -> Tuple[str, str]:
     flags = target
-    explanation = "Basic technology detection"
+    explanation = "Базовое определение технологий"
     
     if "подробный" in context.lower() or "verbose" in context.lower():
         flags = f"-v {target}"
-        explanation = "Verbose output mode"
+        explanation = "Подробный вывод"
     elif "агрессивный" in context.lower() or "aggressive" in context.lower():
         flags = f"-a 3 {target}"
-        explanation = "Aggressive plugin mode (more plugins)"
+        explanation = "Агрессивный режим (больше плагинов)"
     elif profile == "stealth":
         flags = f"-a 1 {target}"
-        explanation = "Stealth mode: light plugin set"
+        explanation = "Скрытый режим (лёгкий набор плагинов)"
     
     return flags, explanation
 
@@ -432,7 +432,7 @@ class TargetAnalyzer:
         if ip_matches:
             result["target_type"] = "ip"
             result["target"] = ip_matches[0]
-            result["explanation"] = f"IP address detected: {ip_matches[0]}"
+            result["explanation"] = f"Обнаружен IP-адрес: {ip_matches[0]}"
             result["suggested_tools"] = ["nmap"]
         
         url_pattern = r'https?://[^\s]+|[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}[^\s]*'
@@ -444,11 +444,11 @@ class TargetAnalyzer:
             result["target_type"] = "url"
             result["target"] = url
             result["has_parameters"] = "?" in url and "=" in url
-            result["explanation"] = f"URL detected: {url}"
+            result["explanation"] = f"Обнаружен URL: {url}"
             result["suggested_tools"] = ["whatweb"]
             if result["has_parameters"]:
                 result["suggested_tools"].insert(0, "sqlmap")
-                result["explanation"] += " | Parameters found → SQL injection test priority"
+                result["explanation"] += " | Обнаружены параметры → приоритет SQL-инъекциям"
         
         keywords = ["sql", "инъекц", "injection", "директори", "directory", 
                     "порт", "port", "уязвим", "vulnerab", "скан", "scan", 
@@ -464,7 +464,7 @@ class TargetAnalyzer:
         return result
 
 # ============================================================
-# АНАЛИЗ ВЫВОДА
+# АНАЛИЗ ВЫВОДА (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ============================================================
 
 class OutputAnalyzer:
@@ -475,45 +475,109 @@ class OutputAnalyzer:
         open_ports = re.findall(r'(\d+)/tcp\s+open\s+(\w+)', output)
         if open_ports:
             analysis["found"] = True
-            analysis["summary"] = f"🔓 {len(open_ports)} open ports discovered"
+            analysis["summary"] = f"🔓 Обнаружено {len(open_ports)} открытых портов"
             for port, service in open_ports[:10]:
-                analysis["details"].append(f"Port {port}: {service}")
+                analysis["details"].append(f"Порт {port}: {service}")
                 if port in ["80", "443", "8080", "8443"]:
-                    analysis["insights"].append(f"🌐 Web server detected on port {port}")
+                    analysis["insights"].append(f"🌐 Веб-сервер на порту {port}")
                 elif service in ["mysql", "postgresql", "mongodb", "redis"]:
-                    analysis["insights"].append(f"🗄️ Database ({service}) on port {port}")
+                    analysis["insights"].append(f"🗄️ База данных ({service}) на порту {port}")
         else:
-            analysis["summary"] = "🔒 No open ports found"
-            analysis["insights"].append("⚠️ Target may be down or firewall blocking")
+            analysis["summary"] = "🔒 Открытых портов не найдено"
+            if "filtered" in output.lower():
+                analysis["insights"].append("🛡️ Порт фильтруется - возможно активен фаервол")
         
         return analysis
     
     @staticmethod
     def analyze_sqlmap(output: str) -> Dict[str, Any]:
+        """Анализирует вывод sqlmap - корректно определяет наличие инъекции"""
         analysis = {"found": False, "summary": "", "details": [], "insights": []}
         
-        if "vulnerable" in output.lower() or "injectable" in output.lower():
+        output_lower = output.lower()
+        
+        # Индикаторы ОТСУТСТВИЯ уязвимости
+        not_found_indicators = [
+            "does not appear to be injectable",
+            "all tested parameters do not appear to be injectable",
+            "not vulnerable",
+            "no injection",
+            "no parameter found",
+            "no parameter seems to be injectable"
+        ]
+        
+        # Индикаторы НАЛИЧИЯ уязвимости
+        found_indicators = [
+            "parameter .* is vulnerable",
+            "vulnerable to sql injection",
+            "the back-end dbms is",
+            "sql injection found",
+            "injectable parameter",
+            "fetching database",
+            "current database:"
+        ]
+        
+        # Сначала проверяем что уязвимость НЕ найдена
+        is_not_found = any(re.search(pattern, output_lower) for pattern in not_found_indicators)
+        
+        if is_not_found:
+            analysis["found"] = False
+            analysis["summary"] = "🛡️ SQL-инъекция НЕ обнаружена"
+            
+            if "waf" in output_lower or "ips" in output_lower:
+                analysis["insights"].append("🛡️ Обнаружена WAF/IPS защита")
+            if "403" in output or "forbidden" in output_lower:
+                analysis["insights"].append("🚫 Сервер вернул 403 Forbidden - доступ ограничен")
+            if "429" in output or "too many requests" in output_lower:
+                analysis["insights"].append("⚠️ Обнаружено ограничение запросов (429)")
+            if "no get parameter" in output_lower:
+                analysis["insights"].append("❓ В URL нет параметров для проверки")
+            
+            return analysis
+        
+        # Проверяем на наличие уязвимости
+        is_found = any(re.search(pattern, output_lower) for pattern in found_indicators)
+        
+        if is_found:
             analysis["found"] = True
-            analysis["summary"] = "🐛 SQL Injection VULNERABLE!"
+            analysis["summary"] = "🐛 SQL-инъекция ОБНАРУЖЕНА!"
             
-            if "boolean" in output.lower():
-                analysis["details"].append("Type: Boolean-based Blind SQLi")
-                analysis["insights"].append("🎯 Boolean-based: Can extract data bit by bit")
-            if "union" in output.lower():
-                analysis["details"].append("Type: Union-based SQLi")
-                analysis["insights"].append("🎯 Union-based: Fast data extraction")
-            if "time" in output.lower():
-                analysis["details"].append("Type: Time-based Blind SQLi")
-                analysis["insights"].append("🎯 Time-based: Works even with no visible output")
+            if "boolean" in output_lower and "blind" in output_lower:
+                analysis["details"].append("Тип: Boolean-based Blind SQLi")
+                analysis["insights"].append("🎯 Boolean-based: Можно извлекать данные побитово")
+            if "union" in output_lower:
+                analysis["details"].append("Тип: Union-based SQLi")
+                analysis["insights"].append("🎯 Union-based: Быстрое извлечение данных")
+            if "time" in output_lower and "blind" in output_lower:
+                analysis["details"].append("Тип: Time-based Blind SQLi")
+                analysis["insights"].append("🎯 Time-based: Работает даже без видимого вывода")
+            if "error" in output_lower:
+                analysis["details"].append("Тип: Error-based SQLi")
+                analysis["insights"].append("🎯 Error-based: Утечка данных через ошибки БД")
             
+            # Поиск баз данных
             dbs = re.findall(r'\[\*\*\]\s+(\w+)', output)
+            if not dbs:
+                dbs = re.findall(r'\[\[\s*\]\]\s+(\w+)', output)
             if dbs:
-                analysis["details"].append(f"Databases found: {', '.join(dbs[:5])}")
-                analysis["insights"].append(f"📊 Database enumeration successful: {len(dbs)} databases")
+                system_dbs = ['information_schema', 'mysql', 'performance_schema', 'sys']
+                user_dbs = [db for db in dbs if db not in system_dbs]
+                if user_dbs:
+                    analysis["details"].append(f"Найдены базы данных: {', '.join(user_dbs[:5])}")
+                    analysis["insights"].append(f"📊 Обнаружено {len(user_dbs)} пользовательских БД")
+            
+            # Поиск текущего пользователя
+            user_match = re.search(r'current user:\s*[\'"]?(\w+)[\'"]?', output_lower)
+            if user_match:
+                analysis["insights"].append(f"👤 Пользователь БД: {user_match.group(1)}")
         else:
-            analysis["summary"] = "🛡️ SQL Injection NOT vulnerable"
-            if "waf" in output.lower():
-                analysis["insights"].append("🛡️ WAF detected - target may be protected")
+            analysis["found"] = False
+            analysis["summary"] = "🛡️ SQL-инъекция НЕ обнаружена"
+            
+            if "waf" in output_lower:
+                analysis["insights"].append("🛡️ Обнаружена WAF защита")
+            if "429" in output:
+                analysis["insights"].append("⚠️ Активно ограничение запросов")
         
         return analysis
     
@@ -522,21 +586,23 @@ class OutputAnalyzer:
         analysis = {"found": False, "summary": "", "details": [], "insights": []}
         
         dirs = re.findall(r'/(\S+)\s+\(Status:\s+(\d+)\)', output)
-        interesting = [d for d in dirs if d[1] in ["200", "301", "302", "401", "403"]]
+        interesting = [d for d in dirs if d[1] in ["200", "301", "302", "401", "403", "500"]]
         
         if interesting:
             analysis["found"] = True
-            analysis["summary"] = f"📁 {len(interesting)} interesting directories found"
+            analysis["summary"] = f"📁 Найдено {len(interesting)} интересных директорий"
             for path, status in interesting[:15]:
                 analysis["details"].append(f"/{path} (HTTP {status})")
                 if status == "200":
-                    analysis["insights"].append(f"📄 Accessible: /{path}")
+                    analysis["insights"].append(f"📄 Доступно: /{path}")
                 elif status == "401":
-                    analysis["insights"].append(f"🔒 Authentication required: /{path}")
+                    analysis["insights"].append(f"🔒 Требуется авторизация: /{path}")
                 elif status == "403":
-                    analysis["insights"].append(f"🚫 Forbidden but exists: /{path}")
+                    analysis["insights"].append(f"🚫 Запрещено, но существует: /{path}")
+                elif status == "500":
+                    analysis["insights"].append(f"⚠️ Ошибка на: /{path} (возможна уязвимость)")
         else:
-            analysis["summary"] = "📭 No interesting directories found"
+            analysis["summary"] = "📭 Интересных директорий не найдено"
         
         return analysis
     
@@ -546,23 +612,25 @@ class OutputAnalyzer:
         
         vuln_pattern = r'\+ (.*?):'
         all_vulns = re.findall(vuln_pattern, output)
-        critical_keywords = ['cve', 'vulnerable', 'rce', 'remote', 'execution', 'injection', 'sql', 'xss']
+        critical_keywords = ['cve', 'vulnerable', 'rce', 'remote', 'execution', 'injection', 'sql', 'xss', 'csrf']
         critical = [v for v in all_vulns if any(k in v.lower() for k in critical_keywords)]
         
         if critical:
             analysis["found"] = True
-            analysis["summary"] = f"⚠️ {len(critical)} potential vulnerabilities found"
+            analysis["summary"] = f"⚠️ Обнаружено {len(critical)} потенциальных уязвимостей"
             for v in critical[:10]:
                 analysis["details"].append(v[:80])
                 if 'cve' in v.lower():
-                    analysis["insights"].append(f"🔴 Known CVE detected: {v[:50]}")
+                    analysis["insights"].append(f"🔴 Известная CVE: {v[:60]}")
+                if 'xss' in v.lower():
+                    analysis["insights"].append("💉 Обнаружена XSS уязвимость")
         
         server_match = re.search(r'\+ Server:\s*(.+?)(?:\n|$)', output, re.IGNORECASE)
         if server_match:
-            analysis["insights"].append(f"🖥️ Server: {server_match.group(1).strip()}")
+            analysis["insights"].append(f"🖥️ Сервер: {server_match.group(1).strip()}")
         
         if not analysis["found"]:
-            analysis["summary"] = "🛡️ No obvious vulnerabilities detected"
+            analysis["summary"] = "🛡️ Очевидных уязвимостей не обнаружено"
         
         return analysis
     
@@ -570,30 +638,50 @@ class OutputAnalyzer:
     def analyze_whatweb(output: str) -> Dict[str, Any]:
         analysis = {"found": False, "summary": "", "details": [], "insights": []}
         
-        techs = re.findall(r'\[(.*?)\]', output)
+        # Очищаем вывод от мусорных символов
+        clean_output = re.sub(r'\x1b\[[0-9;]*m', '', output)
+        
+        # Ищем технологии в квадратных скобках
+        techs = re.findall(r'\[(.*?)\]', clean_output)
         clean_techs = []
         for t in techs:
-            if 'http' not in t.lower() and len(t) < 50 and t not in clean_techs:
-                clean_techs.append(t)
+            t_clean = t.strip()
+            # Фильтруем мусор
+            if (len(t_clean) < 50 and 
+                'http' not in t_clean.lower() and 
+                'm' not in t_clean and
+                '[' not in t_clean and
+                ']' not in t_clean and
+                t_clean not in clean_techs):
+                clean_techs.append(t_clean)
+        
+        # Также ищем прямые упоминания технологий
+        direct_techs = re.findall(r'(Apache|nginx|IIS|PHP|Python|Ruby|Node\.js|WordPress|Joomla|Drupal|Magento)', clean_output, re.IGNORECASE)
+        for tech in direct_techs:
+            if tech not in clean_techs:
+                clean_techs.append(tech)
         
         if clean_techs:
             analysis["found"] = True
-            analysis["summary"] = f"🔧 {len(clean_techs)} technologies detected"
+            analysis["summary"] = f"🔧 Обнаружено {len(clean_techs)} технологий"
             for t in clean_techs[:15]:
                 analysis["details"].append(t)
             
             cms_list = ['WordPress', 'Joomla', 'Drupal', 'Magento']
             for tech in clean_techs:
                 if tech in cms_list:
-                    analysis["insights"].append(f"📰 CMS detected: {tech} - consider CMS-specific tools")
+                    analysis["insights"].append(f"📰 Обнаружена CMS: {tech}")
                 elif 'nginx' in tech.lower():
-                    analysis["insights"].append("⚡ Nginx detected - check misconfigurations")
+                    analysis["insights"].append("⚡ Обнаружен Nginx")
                 elif 'apache' in tech.lower():
-                    analysis["insights"].append("🔄 Apache detected - consider version-specific CVEs")
+                    analysis["insights"].append("🔄 Обнаружен Apache")
                 elif 'php' in tech.lower():
-                    analysis["insights"].append("🐘 PHP detected - check for file inclusion, RCE")
+                    analysis["insights"].append("🐘 Обнаружен PHP")
         else:
-            analysis["summary"] = "❓ Technologies not clearly detected"
+            analysis["summary"] = "❓ Технологии не определены"
+            ip_match = re.search(r'IP\[([0-9.]+)\]', clean_output)
+            if ip_match:
+                analysis["insights"].append(f"🌐 IP сервера: {ip_match.group(1)}")
         
         return analysis
 
@@ -625,7 +713,7 @@ def run_command(cmd: str, timeout: int = 300, show_output: bool = True) -> Dict:
         for line in iter(current_process.stdout.readline, ''):
             if interrupted:
                 current_process.terminate()
-                print(f"\n{Colors.ICON_WARNING} {Colors.YELLOW}Interrupted by user{Colors.END}")
+                print(f"\n{Colors.ICON_WARNING} {Colors.YELLOW}Прервано пользователем{Colors.END}")
                 return {"success": False, "output": "\n".join(output_lines), "interrupted": True}
             
             if line:
@@ -664,13 +752,13 @@ def run_command(cmd: str, timeout: int = 300, show_output: bool = True) -> Dict:
 def run_nmap(target: str, flags: str = None, context: str = "", profile: str = "normal") -> Dict:
     if flags is None:
         flags, explanation = get_nmap_flags(target, context, profile)
-        UI.info(f"Strategy: {explanation}")
+        UI.info(f"Стратегия: {explanation}")
     
     print(f"\n{Colors.BOLD}{Colors.PURPLE}┌─────────────────────────────────────────────────────────────────────────┐{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.PURPLE}│ {Colors.ICON_TOOL} NMAP SCAN{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.PURPLE}│ {Colors.ICON_TOOL} NMAP СКАНИРОВАНИЕ{Colors.END}")
     print(f"{Colors.BOLD}{Colors.PURPLE}├─────────────────────────────────────────────────────────────────────────┤{Colors.END}")
-    print(f"{Colors.CYAN}│ Target:{Colors.END} {Colors.BOLD}{target}{Colors.END}")
-    print(f"{Colors.CYAN}│ Flags:{Colors.END}  {Colors.YELLOW}{flags}{Colors.END}")
+    print(f"{Colors.CYAN}│ Цель:{Colors.END} {Colors.BOLD}{target}{Colors.END}")
+    print(f"{Colors.CYAN}│ Флаги:{Colors.END}  {Colors.YELLOW}{flags}{Colors.END}")
     print(f"{Colors.BOLD}{Colors.PURPLE}└─────────────────────────────────────────────────────────────────────────┘{Colors.END}")
     
     cmd = f"nmap {flags} {target}"
@@ -679,13 +767,13 @@ def run_nmap(target: str, flags: str = None, context: str = "", profile: str = "
 def run_sqlmap(url: str, flags: str = None, context: str = "", profile: str = "normal") -> Dict:
     if flags is None:
         flags, explanation = get_sqlmap_flags(url, context, profile)
-        UI.info(f"Strategy: {explanation}")
+        UI.info(f"Стратегия: {explanation}")
     
     print(f"\n{Colors.BOLD}{Colors.PURPLE}┌─────────────────────────────────────────────────────────────────────────┐{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.PURPLE}│ {Colors.ICON_TOOL} SQLMAP SCAN{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.PURPLE}│ {Colors.ICON_TOOL} SQLMAP СКАНИРОВАНИЕ{Colors.END}")
     print(f"{Colors.BOLD}{Colors.PURPLE}├─────────────────────────────────────────────────────────────────────────┤{Colors.END}")
-    print(f"{Colors.CYAN}│ Target:{Colors.END} {Colors.BOLD}{url}{Colors.END}")
-    print(f"{Colors.CYAN}│ Flags:{Colors.END}  {Colors.YELLOW}{flags}{Colors.END}")
+    print(f"{Colors.CYAN}│ Цель:{Colors.END} {Colors.BOLD}{url}{Colors.END}")
+    print(f"{Colors.CYAN}│ Флаги:{Colors.END}  {Colors.YELLOW}{flags}{Colors.END}")
     print(f"{Colors.BOLD}{Colors.PURPLE}└─────────────────────────────────────────────────────────────────────────┘{Colors.END}")
     
     cmd = f"sqlmap -u '{url}' {flags}"
@@ -694,13 +782,13 @@ def run_sqlmap(url: str, flags: str = None, context: str = "", profile: str = "n
 def run_gobuster(url: str, flags: str = None, context: str = "", profile: str = "normal") -> Dict:
     if flags is None:
         flags, explanation = get_gobuster_flags(url, context, profile)
-        UI.info(f"Strategy: {explanation}")
+        UI.info(f"Стратегия: {explanation}")
     
     print(f"\n{Colors.BOLD}{Colors.PURPLE}┌─────────────────────────────────────────────────────────────────────────┐{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.PURPLE}│ {Colors.ICON_TOOL} GOBUSTER SCAN{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.PURPLE}│ {Colors.ICON_TOOL} GOBUSTER СКАНИРОВАНИЕ{Colors.END}")
     print(f"{Colors.BOLD}{Colors.PURPLE}├─────────────────────────────────────────────────────────────────────────┤{Colors.END}")
-    print(f"{Colors.CYAN}│ Target:{Colors.END} {Colors.BOLD}{url}{Colors.END}")
-    print(f"{Colors.CYAN}│ Flags:{Colors.END}  {Colors.YELLOW}{flags}{Colors.END}")
+    print(f"{Colors.CYAN}│ Цель:{Colors.END} {Colors.BOLD}{url}{Colors.END}")
+    print(f"{Colors.CYAN}│ Флаги:{Colors.END}  {Colors.YELLOW}{flags}{Colors.END}")
     print(f"{Colors.BOLD}{Colors.PURPLE}└─────────────────────────────────────────────────────────────────────────┘{Colors.END}")
     
     cmd = f"gobuster {flags}"
@@ -709,13 +797,13 @@ def run_gobuster(url: str, flags: str = None, context: str = "", profile: str = 
 def run_nikto(target: str, flags: str = None, context: str = "", profile: str = "normal") -> Dict:
     if flags is None:
         flags, explanation = get_nikto_flags(target, context, profile)
-        UI.info(f"Strategy: {explanation}")
+        UI.info(f"Стратегия: {explanation}")
     
     print(f"\n{Colors.BOLD}{Colors.PURPLE}┌─────────────────────────────────────────────────────────────────────────┐{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.PURPLE}│ {Colors.ICON_TOOL} NIKTO SCAN{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.PURPLE}│ {Colors.ICON_TOOL} NIKTO СКАНИРОВАНИЕ{Colors.END}")
     print(f"{Colors.BOLD}{Colors.PURPLE}├─────────────────────────────────────────────────────────────────────────┤{Colors.END}")
-    print(f"{Colors.CYAN}│ Target:{Colors.END} {Colors.BOLD}{target}{Colors.END}")
-    print(f"{Colors.CYAN}│ Flags:{Colors.END}  {Colors.YELLOW}{flags}{Colors.END}")
+    print(f"{Colors.CYAN}│ Цель:{Colors.END} {Colors.BOLD}{target}{Colors.END}")
+    print(f"{Colors.CYAN}│ Флаги:{Colors.END}  {Colors.YELLOW}{flags}{Colors.END}")
     print(f"{Colors.BOLD}{Colors.PURPLE}└─────────────────────────────────────────────────────────────────────────┘{Colors.END}")
     
     cmd = f"nikto {flags}"
@@ -724,13 +812,13 @@ def run_nikto(target: str, flags: str = None, context: str = "", profile: str = 
 def run_whatweb(target: str, flags: str = None, context: str = "", profile: str = "normal") -> Dict:
     if flags is None:
         flags, explanation = get_whatweb_flags(target, context, profile)
-        UI.info(f"Strategy: {explanation}")
+        UI.info(f"Стратегия: {explanation}")
     
     print(f"\n{Colors.BOLD}{Colors.PURPLE}┌─────────────────────────────────────────────────────────────────────────┐{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.PURPLE}│ {Colors.ICON_TOOL} WHATWEB SCAN{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.PURPLE}│ {Colors.ICON_TOOL} WHATWEB СКАНИРОВАНИЕ{Colors.END}")
     print(f"{Colors.BOLD}{Colors.PURPLE}├─────────────────────────────────────────────────────────────────────────┤{Colors.END}")
-    print(f"{Colors.CYAN}│ Target:{Colors.END} {Colors.BOLD}{target}{Colors.END}")
-    print(f"{Colors.CYAN}│ Flags:{Colors.END}  {Colors.YELLOW}{flags}{Colors.END}")
+    print(f"{Colors.CYAN}│ Цель:{Colors.END} {Colors.BOLD}{target}{Colors.END}")
+    print(f"{Colors.CYAN}│ Флаги:{Colors.END}  {Colors.YELLOW}{flags}{Colors.END}")
     print(f"{Colors.BOLD}{Colors.PURPLE}└─────────────────────────────────────────────────────────────────────────┘{Colors.END}")
     
     cmd = f"whatweb {flags}"
@@ -750,7 +838,7 @@ class JimSession:
         self.discovered_ports: List[int] = []
         self.technologies: List[str] = []
         self.found_vulnerabilities: List[Dict] = []
-        self.current_phase = "Initializing"
+        self.current_phase = "Инициализация"
         self.progress = 0
         self.context = {}
         self.paused = False
@@ -773,14 +861,14 @@ class JimSession:
                 self.found_vulnerabilities.append({
                     "severity": "info",
                     "type": "web_service",
-                    "description": "Web service detected",
+                    "description": "Обнаружен веб-сервис",
                     "timestamp": result.timestamp
                 })
         elif result.tool == "sqlmap" and result.analysis.get("found"):
             self.found_vulnerabilities.append({
                 "severity": "critical",
                 "type": "sql_injection",
-                "description": result.analysis.get("summary", "SQL Injection found"),
+                "description": result.analysis.get("summary", "Обнаружена SQL-инъекция"),
                 "details": result.analysis.get("details", []),
                 "timestamp": result.timestamp
             })
@@ -824,18 +912,18 @@ class JimSession:
     
     def print_status(self):
         print(f"\n{Colors.BOLD}{Colors.CYAN}┌─────────────────────────────────────────────────────────────────────────┐{Colors.END}")
-        print(f"{Colors.BOLD}{Colors.CYAN}│ {Colors.ICON_TARGET} SESSION STATUS{Colors.END}")
+        print(f"{Colors.BOLD}{Colors.CYAN}│ {Colors.ICON_TARGET} СТАТУС СЕССИИ{Colors.END}")
         print(f"{Colors.BOLD}{Colors.CYAN}├─────────────────────────────────────────────────────────────────────────┤{Colors.END}")
-        print(f"{Colors.CYAN}│ Session:{Colors.END} {self.session_id}")
-        print(f"{Colors.CYAN}│ Target:{Colors.END} {Colors.BOLD}{self.target}{Colors.END}")
-        print(f"{Colors.CYAN}│ Phase:{Colors.END} {self.current_phase}")
-        print(f"{Colors.CYAN}│ Progress:{Colors.END}")
+        print(f"{Colors.CYAN}│ Сессия:{Colors.END} {self.session_id}")
+        print(f"{Colors.CYAN}│ Цель:{Colors.END} {Colors.BOLD}{self.target}{Colors.END}")
+        print(f"{Colors.CYAN}│ Фаза:{Colors.END} {self.current_phase}")
+        print(f"{Colors.CYAN}│ Прогресс:{Colors.END}")
         UI.progress_bar(int(self.progress))
-        print(f"{Colors.CYAN}│ Tools run:{Colors.END} {len(self.scan_history)}")
-        print(f"{Colors.CYAN}│ Vulnerabilities:{Colors.END} {len(self.found_vulnerabilities)}")
-        print(f"{Colors.CYAN}│ Duration:{Colors.END} {str(datetime.now() - self.start_time).split('.')[0]}")
+        print(f"{Colors.CYAN}│ Запущено утилит:{Colors.END} {len(self.scan_history)}")
+        print(f"{Colors.CYAN}│ Найдено уязвимостей:{Colors.END} {len(self.found_vulnerabilities)}")
+        print(f"{Colors.CYAN}│ Длительность:{Colors.END} {str(datetime.now() - self.start_time).split('.')[0]}")
         if self.found_vulnerabilities:
-            print(f"{Colors.CYAN}│ Findings:{Colors.END}")
+            print(f"{Colors.CYAN}│ Находки:{Colors.END}")
             for vuln in self.found_vulnerabilities[:3]:
                 severity_color = Colors.RED if vuln["severity"] == "critical" else Colors.YELLOW
                 print(f"{Colors.DIM}│   {severity_color}▪ {vuln['description'][:50]}{Colors.END}")
@@ -846,47 +934,49 @@ class JimSession:
         duration = self.end_time - self.start_time
         
         print(f"\n{Colors.BOLD}{Colors.GREEN}{'═' * 70}{Colors.END}")
-        print(f"{Colors.BOLD}{Colors.GREEN}{Colors.ICON_REPORT} FINAL ASSESSMENT REPORT{Colors.END}")
+        print(f"{Colors.BOLD}{Colors.GREEN}{Colors.ICON_REPORT} ИТОГОВЫЙ ОТЧЁТ{Colors.END}")
         print(f"{Colors.BOLD}{Colors.GREEN}{'═' * 70}{Colors.END}")
-        print(f"\n{Colors.CYAN}🎯 Target:{Colors.END} {Colors.BOLD}{self.target}{Colors.END}")
-        print(f"{Colors.CYAN}⏱️ Duration:{Colors.END} {str(duration).split('.')[0]}")
-        print(f"{Colors.CYAN}🛠️ Tools used:{Colors.END} {len(self.scan_history)}")
+        print(f"\n{Colors.CYAN}🎯 Цель:{Colors.END} {Colors.BOLD}{self.target}{Colors.END}")
+        print(f"{Colors.CYAN}⏱️ Длительность:{Colors.END} {str(duration).split('.')[0]}")
+        print(f"{Colors.CYAN}🛠️ Использовано утилит:{Colors.END} {len(self.scan_history)}")
         
         critical = [v for v in self.found_vulnerabilities if v["severity"] == "critical"]
         high = [v for v in self.found_vulnerabilities if v["severity"] == "high"]
         medium = [v for v in self.found_vulnerabilities if v["severity"] == "medium"]
         
         if critical:
-            print(f"\n{Colors.BG_RED}{Colors.BOLD}{Colors.WHITE}🔴 CRITICAL VULNERABILITIES{Colors.END}")
+            print(f"\n{Colors.BG_RED}{Colors.BOLD}{Colors.WHITE}🔴 КРИТИЧЕСКИЕ УЯЗВИМОСТИ{Colors.END}")
             for v in critical:
                 print(f"   • {v['description']}")
         if high:
-            print(f"\n{Colors.RED}{Colors.BOLD}🟠 HIGH RISK{Colors.END}")
+            print(f"\n{Colors.RED}{Colors.BOLD}🟠 ВЫСОКИЙ РИСК{Colors.END}")
             for v in high:
                 print(f"   • {v['description']}")
         if medium:
-            print(f"\n{Colors.YELLOW}{Colors.BOLD}🟡 MEDIUM RISK{Colors.END}")
+            print(f"\n{Colors.YELLOW}{Colors.BOLD}🟡 СРЕДНИЙ РИСК{Colors.END}")
             for v in medium:
                 print(f"   • {v['description']}")
+        
         if self.technologies:
-            print(f"\n{Colors.CYAN}{Colors.BOLD}🔧 TECHNOLOGIES DETECTED{Colors.END}")
+            print(f"\n{Colors.CYAN}{Colors.BOLD}🔧 ОБНАРУЖЕННЫЕ ТЕХНОЛОГИИ{Colors.END}")
             for tech in self.technologies[:10]:
                 print(f"   • {tech}")
+        
         if self.discovered_ports:
-            print(f"\n{Colors.CYAN}{Colors.BOLD}🔌 OPEN PORTS{Colors.END}")
+            print(f"\n{Colors.CYAN}{Colors.BOLD}🔌 ОТКРЫТЫЕ ПОРТЫ{Colors.END}")
             print(f"   {', '.join(map(str, self.discovered_ports[:15]))}")
         
-        print(f"\n{Colors.GREEN}{Colors.BOLD}💡 RECOMMENDATIONS{Colors.END}")
+        print(f"\n{Colors.GREEN}{Colors.BOLD}💡 РЕКОМЕНДАЦИИ{Colors.END}")
         if critical:
-            print(f"   • Patch critical vulnerabilities immediately")
+            print(f"   • Немедленно исправьте критические уязвимости")
         if any('sql' in str(v).lower() for v in critical):
-            print(f"   • Use parameterized queries to prevent SQL injection")
+            print(f"   • Используйте параметризованные запросы для защиты от SQL-инъекций")
         if 'WordPress' in self.technologies:
-            print(f"   • Run wpscan for WordPress-specific vulnerabilities")
+            print(f"   • Запустите wpscan для поиска уязвимостей WordPress")
         if not self.found_vulnerabilities:
-            print(f"   • No obvious vulnerabilities found. Consider manual testing.")
+            print(f"   • Очевидных уязвимостей не найдено. Рекомендуется ручное тестирование.")
         
-        print(f"\n{Colors.DIM}📁 Session saved to: ~/.jim/sessions/{self.session_id}/{Colors.END}")
+        print(f"\n{Colors.DIM}📁 Сессия сохранена: ~/.jim/sessions/{self.session_id}/{Colors.END}")
         print(f"{Colors.BOLD}{Colors.GREEN}{'═' * 70}{Colors.END}")
 
 # ============================================================
@@ -896,8 +986,8 @@ class JimSession:
 class JimAgent:
     def __init__(self):
         if not API_KEY:
-            UI.error("API key not found!")
-            UI.info("Run ./install.sh to configure")
+            UI.error("API ключ не найден!")
+            UI.info("Запустите ./install.sh для настройки")
             sys.exit(1)
         
         import openai
@@ -915,14 +1005,14 @@ class JimAgent:
         if user_input.startswith('/'):
             return self._handle_command(user_input)
         
-        UI.loading_animation("Analyzing target...", 0.3)
+        UI.loading_animation("Анализ цели...", 0.3)
         analysis = TargetAnalyzer.analyze(user_input)
         
         if not analysis["target"]:
-            return "❌ Could not identify target. Please provide an IP address or URL."
+            return "❌ Не удалось определить цель. Укажите IP-адрес или URL."
         
         self.session = JimSession(analysis["target"])
-        self.session.current_phase = "Analyzing target"
+        self.session.current_phase = "Анализ цели"
         self.session.print_status()
         
         return self._execute_plan(analysis)
@@ -938,28 +1028,28 @@ class JimAgent:
         
         for tool in suggested_tools:
             if self.session.paused:
-                UI.warning("Session paused. Type 'continue' to resume")
+                UI.warning("Сессия приостановлена. Введите 'continue' для продолжения")
                 break
             
-            self.session.current_phase = f"Running {tool}"
+            self.session.current_phase = f"Запуск {tool}"
             self.session.print_status()
             
             if not self.auto_mode:
-                print(f"\n{Colors.YELLOW}📋 Next: {tool.upper()} on {target}{Colors.END}")
-                response = input(f"{Colors.CYAN}Run this tool? (y/n/skip/auto): {Colors.END}").strip().lower()
+                print(f"\n{Colors.YELLOW}📋 Следующий шаг: {tool.upper()} на {target}{Colors.END}")
+                response = input(f"{Colors.CYAN}Запустить? (y/n/skip/auto): {Colors.END}").strip().lower()
                 if response == 'n':
-                    UI.info("Skipping...")
+                    UI.info("Пропускаем...")
                     continue
                 elif response == 'auto':
                     self.auto_mode = True
                 elif response == 'skip':
-                    UI.info("Skipping...")
+                    UI.info("Пропускаем...")
                     continue
             
             result = self._run_tool(tool, target, analysis.get("keywords", []))
             
             if result and result.get("interrupted"):
-                UI.warning("Scan interrupted by user")
+                UI.warning("Сканирование прервано пользователем")
                 break
             
             if result:
@@ -977,11 +1067,11 @@ class JimAgent:
                 self._print_analysis(tool, analysis_result)
                 
                 if analysis_result.get("found") and tool == "sqlmap":
-                    UI.warning("CRITICAL: SQL Injection found! Stopping further scans.")
+                    UI.warning("КРИТИЧЕСКО: Обнаружена SQL-инъекция! Дальнейшее сканирование остановлено.")
                     break
         
         self.session.print_final_report()
-        return "✅ Assessment completed"
+        return "✅ Оценка завершена"
     
     def _run_tool(self, tool: str, target: str, keywords: List[str]) -> Dict:
         context = " ".join(keywords)
@@ -995,7 +1085,7 @@ class JimAgent:
             return run_nikto(target, context=context, profile=self.profile)
         elif tool == "whatweb":
             return run_whatweb(target, context=context, profile=self.profile)
-        return {"success": False, "error": f"Unknown tool: {tool}"}
+        return {"success": False, "error": f"Неизвестный инструмент: {tool}"}
     
     def _analyze_tool_output(self, tool: str, output: str) -> Dict:
         if tool == "nmap":
@@ -1008,20 +1098,23 @@ class JimAgent:
             return OutputAnalyzer.analyze_nikto(output)
         elif tool == "whatweb":
             return OutputAnalyzer.analyze_whatweb(output)
-        return {"found": False, "summary": "Unknown tool", "details": [], "insights": []}
+        return {"found": False, "summary": "Неизвестный инструмент", "details": [], "insights": []}
     
     def _print_analysis(self, tool: str, analysis: Dict):
         print(f"\n{Colors.BOLD}{Colors.CYAN}┌─────────────────────────────────────────────────────────────────────────┐{Colors.END}")
-        print(f"{Colors.BOLD}{Colors.CYAN}│ {Colors.ICON_ANALYSIS} ANALYSIS - {tool.upper()}{Colors.END}")
+        print(f"{Colors.BOLD}{Colors.CYAN}│ {Colors.ICON_ANALYSIS} АНАЛИЗ - {tool.upper()}{Colors.END}")
         print(f"{Colors.BOLD}{Colors.CYAN}├─────────────────────────────────────────────────────────────────────────┤{Colors.END}")
+        
         if analysis.get("found"):
-            print(f"{Colors.DIM}│{Colors.END} {Colors.GREEN}{analysis.get('summary', 'Findings detected')}{Colors.END}")
+            print(f"{Colors.DIM}│{Colors.END} {Colors.RED}{analysis.get('summary', 'Найдено')}{Colors.END}")
         else:
-            print(f"{Colors.DIM}│{Colors.END} {Colors.YELLOW}{analysis.get('summary', 'No findings')}{Colors.END}")
+            print(f"{Colors.DIM}│{Colors.END} {Colors.GREEN}{analysis.get('summary', 'Не найдено')}{Colors.END}")
+        
         for insight in analysis.get("insights", [])[:5]:
             print(f"{Colors.DIM}│{Colors.END}   {insight}")
         for detail in analysis.get("details", [])[:5]:
             print(f"{Colors.DIM}│{Colors.END}   • {detail}")
+        
         print(f"{Colors.BOLD}{Colors.CYAN}└─────────────────────────────────────────────────────────────────────────┘{Colors.END}")
     
     def _dry_run_report(self, analysis: Dict) -> str:
@@ -1029,24 +1122,24 @@ class JimAgent:
         suggested_tools = analysis["suggested_tools"]
         report = f"""
 {Colors.BOLD}{Colors.CYAN}{'═' * 70}{Colors.END}
-{Colors.BOLD}{Colors.CYAN}{Colors.ICON_SPARKLES} DRY RUN MODE - What would happen{Colors.END}
+{Colors.BOLD}{Colors.CYAN}{Colors.ICON_SPARKLES} РЕЖИМ DRY RUN - Что будет выполнено{Colors.END}
 {Colors.BOLD}{Colors.CYAN}{'═' * 70}{Colors.END}
 
-🎯 Target: {target}
-📋 Detected type: {analysis['target_type']}
-🔍 Keywords: {', '.join(analysis['keywords']) if analysis['keywords'] else 'none'}
+🎯 Цель: {target}
+📋 Тип: {analysis['target_type']}
+🔍 Ключевые слова: {', '.join(analysis['keywords']) if analysis['keywords'] else 'нет'}
 
-📊 Proposed scan plan:
+📊 План сканирования:
 """
         for i, tool in enumerate(suggested_tools, 1):
             flags, explanation = self._get_default_flags(tool, target)
             report += f"""
 {i}. {tool.upper()}
-   → Flags: {flags}
-   → Why: {explanation}
+   → Флаги: {flags}
+   → Зачем: {explanation}
 """
         report += f"""
-{Colors.YELLOW}ℹ️ No actual scans were performed. Run without --dry-run to execute.{Colors.END}
+{Colors.YELLOW}ℹ️ Реальное сканирование не выполнялось. Запустите без --dry-run для выполнения.{Colors.END}
 {Colors.BOLD}{Colors.CYAN}{'═' * 70}{Colors.END}
 """
         return report
@@ -1071,45 +1164,45 @@ class JimAgent:
             if self.session:
                 self.session.print_status()
                 return ""
-            return "ℹ️ No active session. Start by providing a target (IP or URL)."
+            return "ℹ️ Нет активной сессии. Укажите цель (IP или URL)."
         
         elif cmd in ["stop", "pause"]:
             if self.session:
                 self.session.paused = True
-                return "⏸️ Session paused. Type 'continue' to resume"
-            return "ℹ️ No active session to pause"
+                return "⏸️ Сессия приостановлена. Введите 'continue' для продолжения"
+            return "ℹ️ Нет активной сессии для приостановки"
         
         elif cmd in ["continue", "resume"]:
             if self.session:
                 self.session.paused = False
-                return "▶️ Session resumed"
-            return "ℹ️ No active session to resume"
+                return "▶️ Сессия возобновлена"
+            return "ℹ️ Нет активной сессии для возобновления"
         
         elif cmd in ["report", "summary"]:
             if self.session:
                 self.session.print_final_report()
                 return ""
-            return "ℹ️ No active session. Start scanning first."
+            return "ℹ️ Нет активной сессии. Сначала начните сканирование."
         
         elif cmd in ["save", "export"]:
             if self.session:
                 self.session._save_session()
-                return f"💾 Session saved to ~/.jim/sessions/{self.session.session_id}/"
-            return "ℹ️ No active session to save"
+                return f"💾 Сессия сохранена в ~/.jim/sessions/{self.session.session_id}/"
+            return "ℹ️ Нет активной сессии для сохранения"
         
         elif cmd in ["history", "log"]:
             if self.session:
                 if not self.session.scan_history:
-                    return "📋 No scans performed yet in this session"
-                print(f"\n{Colors.BOLD}📋 Scan History:{Colors.END}")
+                    return "📋 В этой сессии ещё не было сканирований"
+                print(f"\n{Colors.BOLD}📋 История сканирований:{Colors.END}")
                 for i, scan in enumerate(self.session.scan_history, 1):
                     status_icon = Colors.ICON_SUCCESS if scan.status == ScanStatus.COMPLETED else Colors.ICON_ERROR
                     status_color = Colors.GREEN if scan.status == ScanStatus.COMPLETED else Colors.RED
-                    print(f"  {i}. {status_icon} {status_color}{scan.tool.upper()}{Colors.END} - {scan.duration:.1f}s")
+                    print(f"  {i}. {status_icon} {status_color}{scan.tool.upper()}{Colors.END} - {scan.duration:.1f}с")
                     if scan.analysis.get("summary"):
                         print(f"     └─ {scan.analysis['summary'][:60]}")
                 return ""
-            return "ℹ️ No session history"
+            return "ℹ️ Нет истории сессии"
         
         elif cmd in ["reset", "clear_memory", "forget", "clear"]:
             # Очищаем историю сообщений
@@ -1133,49 +1226,48 @@ class JimAgent:
             
             return f"""
 {Colors.BOLD}{Colors.CYAN}╔════════════════════════════════════════════════════════════════════╗{Colors.END}
-{Colors.BOLD}{Colors.CYAN}║                    {Colors.ICON_RESET} MEMORY RESET COMPLETE {Colors.ICON_RESET}                     ║{Colors.END}
+{Colors.BOLD}{Colors.CYAN}║                    {Colors.ICON_RESET} ПАМЯТЬ ОЧИЩЕНА {Colors.ICON_RESET}                     ║{Colors.END}
 {Colors.BOLD}{Colors.CYAN}╠════════════════════════════════════════════════════════════════════╣{Colors.END}
 {Colors.BOLD}{Colors.CYAN}║                                                                    ║{Colors.END}
-{Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} Conversation history cleared                                   ║{Colors.END}
-{Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} Session context cleared                                        ║{Colors.END}
-{Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} Active scans stopped (if any)                                  ║{Colors.END}
-{Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} Agent memory reset to factory state                            ║{Colors.END}
+{Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} История диалога очищена                                    ║{Colors.END}
+{Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} Контекст сессии очищен                                      ║{Colors.END}
+{Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} Активные сканирования остановлены                            ║{Colors.END}
+{Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} Память агента сброшена к заводским настройкам                ║{Colors.END}
 {Colors.BOLD}{Colors.CYAN}║                                                                    ║{Colors.END}
-{Colors.BOLD}{Colors.CYAN}║  {Colors.ICON_INFO} Jim is now fresh and ready for new targets!                    ║{Colors.END}
+{Colors.BOLD}{Colors.CYAN}║  {Colors.ICON_INFO} Jim готов к новым целям!                                   ║{Colors.END}
 {Colors.BOLD}{Colors.CYAN}║                                                                    ║{Colors.END}
-{Colors.BOLD}{Colors.CYAN}║  {Colors.DIM}💡 Tip: Use /help to see all commands{Colors.END}                            ║{Colors.END}
 {Colors.BOLD}{Colors.CYAN}╚════════════════════════════════════════════════════════════════════╝{Colors.END}"""
         
         elif cmd in ["help", "?"]:
             return """
 ╔════════════════════════════════════════════════════════════════════╗
-║                      INTERACTIVE COMMANDS                          ║
+║                      ИНТЕРАКТИВНЫЕ КОМАНДЫ                         ║
 ╠════════════════════════════════════════════════════════════════════╣
 ║                                                                    ║
-║  SESSION CONTROL:                                                 ║
-║    /status, /stats   - Show current session status                ║
-║    /stop, /pause     - Pause current scan                         ║
-║    /continue, /resume- Resume paused scan                         ║
-║    /reset, /clear    - Clear ALL memory and context               ║
-║    /reset screen     - Clear memory AND screen                    ║
+║  УПРАВЛЕНИЕ СЕССИЕЙ:                                              ║
+║    /status, /stats   - Показать статус текущей сессии             ║
+║    /stop, /pause     - Приостановить сканирование                 ║
+║    /continue, /resume- Возобновить сканирование                   ║
+║    /reset, /clear    - Очистить ВСЮ память и контекст             ║
+║    /reset screen     - Очистить память И экран                    ║
 ║                                                                    ║
-║  REPORTING:                                                       ║
-║    /report, /summary - Show final report                          ║
-║    /save, /export    - Save current session                       ║
-║    /history, /log    - Show scan history                          ║
+║  ОТЧЁТЫ:                                                          ║
+║    /report, /summary - Показать итоговый отчёт                    ║
+║    /save, /export    - Сохранить текущую сессию                   ║
+║    /history, /log    - Показать историю сканирований              ║
 ║                                                                    ║
-║  OTHER:                                                           ║
-║    /help, /?         - Show this help                             ║
-║    /exit, /quit      - Exit Jim                                   ║
+║  ПРОЧЕЕ:                                                          ║
+║    /help, /?         - Показать эту справку                       ║
+║    /exit, /quit      - Выйти из Jim                               ║
 ║                                                                    ║
-║  💡 Examples:                                                     ║
-║    > Scan website example.com for vulnerabilities                 ║
-║    > Aggressive nmap on 192.168.1.1                              ║
-║    > Test SQL on site.com/page?id=1                              ║
+║  💡 Примеры:                                                      ║
+║    > Проверь сайт example.com на уязвимости                       ║
+║    > Агрессивное сканирование nmap на 192.168.1.1                ║
+║    > Проверь SQL на site.com/page?id=1                           ║
 ║                                                                    ║
 ╚════════════════════════════════════════════════════════════════════╝"""
         
-        return f"❌ Unknown command: {command}. Type /help for available commands"
+        return f"❌ Неизвестная команда: {command}. Введите /help для списка команд"
 
 # ============================================================
 # ЗАПУСК
@@ -1200,16 +1292,16 @@ def print_banner():
 ║                        ██║  ██║███████╗  ███████╗██║ ╚████║   ██║                            ║
 ║                        ╚═╝  ╚═╝╚══════╝  ╚══════╝╚═╝  ╚═══╝   ╚═╝                            ║
 ║                                                                                              ║
-║                         🤖 JIM - AI PENTESTING ASSISTANT 🤖                                   ║
-║                                   v2.0.0 | The Smart Agent                                   ║
+║                         🤖 JIM - AI АССИСТЕНТ ДЛЯ ПЕНТЕСТА 🤖                                 ║
+║                                   v2.0.0 | Умный агент                                        ║
 ║                                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════════════════════╝
 """
     print(f"{Colors.CYAN}{banner}{Colors.END}")
     print(f"{Colors.DIM}{'='*70}{Colors.END}")
-    print(f"{Colors.ICON_ROCKET} {Colors.GREEN}Jim initialized{Colors.END} | {Colors.ICON_SHIELD} Ready for action")
-    print(f"{Colors.ICON_INFO} Commands: {Colors.YELLOW}/help{Colors.END} | {Colors.YELLOW}/status{Colors.END} | {Colors.YELLOW}/reset{Colors.END} | {Colors.YELLOW}/exit{Colors.END}")
-    print(f"{Colors.ICON_FLAG} Profile: {Colors.BOLD}{PROFILE}{Colors.END} | Mode: {Colors.BOLD}{'Auto' if AUTO_MODE else 'Interactive'}{Colors.END}")
+    print(f"{Colors.ICON_ROCKET} {Colors.GREEN}Jim инициализирован{Colors.END} | {Colors.ICON_SHIELD} Готов к работе")
+    print(f"{Colors.ICON_INFO} Команды: {Colors.YELLOW}/help{Colors.END} | {Colors.YELLOW}/status{Colors.END} | {Colors.YELLOW}/reset{Colors.END} | {Colors.YELLOW}/exit{Colors.END}")
+    print(f"{Colors.ICON_FLAG} Профиль: {Colors.BOLD}{PROFILE}{Colors.END} | Режим: {Colors.BOLD}{'Авто' if AUTO_MODE else 'Интерактивный'}{Colors.END}")
     print(f"{Colors.DIM}{'='*70}{Colors.END}")
 
 def main():
@@ -1218,19 +1310,19 @@ def main():
     
     if AUTO_MODE and len(sys.argv) > 2:
         target = ' '.join(sys.argv[2:])
-        print(f"\n{Colors.ICON_AGENT} {Colors.BLUE}Autonomous mode: Scanning {target}{Colors.END}")
+        print(f"\n{Colors.ICON_AGENT} {Colors.BLUE}Автономный режим: сканирование {target}{Colors.END}")
         response = agent.process(target)
-        print(f"\n{Colors.ICON_AGENT} {Colors.GREEN}Done!{Colors.END}")
+        print(f"\n{Colors.ICON_AGENT} {Colors.GREEN}Готово!{Colors.END}")
         return
     
-    print(f"\n{Colors.ICON_AGENT} {Colors.GREEN}Interactive mode. Type your target or /help{Colors.END}")
+    print(f"\n{Colors.ICON_AGENT} {Colors.GREEN}Интерактивный режим. Введите цель или /help{Colors.END}")
     
     while True:
         try:
             user_input = input(f"\n{Colors.BOLD}{Colors.GREEN}[{Colors.ICON_USER} jim]{Colors.END} ").strip()
             
             if user_input.lower() in ['/exit', '/quit', 'exit', 'quit']:
-                print(f"\n{Colors.ICON_AGENT} {Colors.GREEN}See you next time!{Colors.END}\n")
+                print(f"\n{Colors.ICON_AGENT} {Colors.GREEN}До свидания!{Colors.END}\n")
                 break
             
             if not user_input:
@@ -1241,10 +1333,10 @@ def main():
                 print(f"\n{Colors.ICON_AGENT} {response}")
             
         except KeyboardInterrupt:
-            print(f"\n\n{Colors.ICON_WARNING} {Colors.YELLOW}Interrupted. Type /exit to quit{Colors.END}")
+            print(f"\n\n{Colors.ICON_WARNING} {Colors.YELLOW}Прервано. Введите /exit для выхода{Colors.END}")
             continue
         except EOFError:
-            print(f"\n{Colors.ICON_AGENT} {Colors.GREEN}Goodbye!{Colors.END}\n")
+            print(f"\n{Colors.ICON_AGENT} {Colors.GREEN}До свидания!{Colors.END}\n")
             break
 
 if __name__ == "__main__":
