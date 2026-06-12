@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DeepSeek Agent for Kali Linux - Все настройки внутри кода
+DeepSeek Agent for Kali Linux - С анализом вывода утилит
 """
 
 import openai
@@ -16,61 +16,42 @@ from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 
 # ============================================================
-# НАСТРОЙКИ (ВСЁ ВНУТРИ КОДА)
+# НАСТРОЙКИ
 # ============================================================
 
-# Модель и параметры API
 MODEL_NAME = "deepseek/deepseek-v4-flash"
 MAX_ITERATIONS = 15
 TEMPERATURE = 0.3
-API_TIMEOUT = 60
+USE_SEPARATE_WINDOWS = False  # False - вывод в консоль, чтобы агент видел результат
 
-# Режим отображения (True - отдельные окна, False - вывод в консоль)
-USE_SEPARATE_WINDOWS = True
+SYSTEM_PROMPT = """Ты - DeepSeek Agent для Kali Linux. Твоя задача - запускать утилиты и АНАЛИЗИРОВАТЬ их вывод.
 
-# Параметры таймаутов для утилит (в секундах)
-TIMEOUTS = {
-    "nmap": 600,
-    "sqlmap": 1200,
-    "gobuster": 600,
-    "nikto": 900,
-    "whatweb": 120,
-    "hydra": 1800,
-    "default": 300
-}
+## ВАЖНО: После каждого запуска утилиты ты ДОЛЖЕН проанализировать её вывод и дать отчёт!
 
-# Пути к словарям (Kali Linux)
-WORDLISTS = {
-    "dirb_common": "/usr/share/wordlists/dirb/common.txt",
-    "dirb_big": "/usr/share/wordlists/dirb/big.txt",
-    "rockyou": "/usr/share/wordlists/rockyou.txt",
-    "seclists": "/usr/share/seclists/Discovery/Web-Content/common.txt"
-}
+## ФОРМАТ ОТВЕТА ПОСЛЕ SQLMAP:
+═══════════════════════════════════════════════════════════════
+📊 **ОТЧЁТ SQLMAP**
+═══════════════════════════════════════════════════════════════
 
-# Системный промпт (можно вынести в файл или оставить здесь)
-SYSTEM_PROMPT = """Ты - DeepSeek Agent для Kali Linux. Твоя задача - помогать пользователю в пентесте.
+🔍 **СТАТУС:** [НАЙДЕНО / НЕ НАЙДЕНО]
 
-## ВОЗМОЖНОСТИ:
-- Запускай nmap, sqlmap, gobuster, nikto, whatweb, hydra
-- Анализируй вывод утилит и извлекай важную информацию
-- Предлагай следующие шаги на основе результатов
+🗄️ **БАЗЫ ДАННЫХ:**
+- [список найденных БД]
 
-## СТИЛЬ ОТВЕТОВ:
-1. Сначала покажи что ты делаешь
-2. После выполнения команды проанализируй результаты
-3. Дай понятный вывод: что найдено, какие риски
+📋 **ТАБЛИЦЫ (если найдены):**
+- [список таблиц]
 
-Будь полезным, профессиональным и понятным."""
+⚠️ **УЯЗВИМОСТИ:**
+- [тип уязвимости]
+
+📊 **ВЫВОД:** [краткое заключение]
+
+═══════════════════════════════════════════════════════════════
+
+Будь внимателен при анализе вывода!"""
 
 # ============================================================
-# ЗАГРУЗКА API КЛЮЧА ИЗ .env
-# ============================================================
-
-load_dotenv()
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-
-# ============================================================
-# ЦВЕТА И UI
+# ЦВЕТА
 # ============================================================
 
 class Colors:
@@ -80,329 +61,387 @@ class Colors:
     BLUE = '\033[94m'
     PURPLE = '\033[95m'
     CYAN = '\033[96m'
-    WHITE = '\033[97m'
     BOLD = '\033[1m'
     DIM = '\033[2m'
-    ITALIC = '\033[3m'
     END = '\033[0m'
     
     ICON_AGENT = "🤖"
     ICON_USER = "👤"
     ICON_TOOL = "🔧"
-    ICON_TERMINAL = "💻"
     ICON_SUCCESS = "✅"
     ICON_ERROR = "❌"
     ICON_WARNING = "⚠️"
     ICON_INFO = "ℹ️"
-    ICON_WINDOW = "🪟"
-    ICON_LOADING = "⏳"
+    ICON_DB = "🗄️"
+    ICON_TABLE = "📋"
+    ICON_VULN = "⚠️"
 
-def print_banner():
-    os.system('clear' if sys.platform != 'win32' else 'cls')
-    print(f"""{Colors.BOLD}{Colors.CYAN}
-╔═══════════════════════════════════════════════════════════════════════════╗
-║                    🤖 DEEPSEEK AGENT - KALI LINUX 🤖                       ║
-║                    🪟 Автономный агент для пентеста 🪟                      ║
-╚═══════════════════════════════════════════════════════════════════════════╝{Colors.END}
-    """)
+# ============================================================
+# ЗАГРУЗКА КЛЮЧА
+# ============================================================
 
-def print_check(item: str, status: bool, message: str = ""):
-    if status:
-        print(f"  {Colors.ICON_SUCCESS} {Colors.GREEN}✓{Colors.END} {item}: {Colors.GREEN}{message or 'OK'}{Colors.END}")
+load_dotenv()
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+if not OPENROUTER_API_KEY:
+    print(f"{Colors.ICON_ERROR} {Colors.RED}API ключ не найден в .env{Colors.END}")
+    print(f"{Colors.ICON_INFO} Создайте файл .env с: OPENROUTER_API_KEY=sk-or-v1-ваш_ключ")
+    sys.exit(1)
+
+# ============================================================
+# ЗАПУСК КОМАНД С ЧТЕНИЕМ ВЫВОДА
+# ============================================================
+
+def run_command_with_output(command: str, timeout: int = 600) -> dict:
+    """
+    Запускает команду и ВОЗВРАЩАЕТ её вывод для анализа
+    """
+    print(f"\n{Colors.ICON_TOOL} {Colors.CYAN}Запуск:{Colors.END} {Colors.BOLD}{command}{Colors.END}")
+    print(f"{Colors.DIM}{'─' * 70}{Colors.END}")
+    
+    try:
+        process = subprocess.Popen(
+            command,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # Объединяем stdout и stderr
+            text=True,
+            bufsize=1,
+            universal_newlines=True,
+            executable='/bin/bash' if sys.platform != 'win32' else None
+        )
+        
+        output_lines = []
+        
+        # Читаем вывод в реальном времени
+        for line in iter(process.stdout.readline, ''):
+            if line:
+                output_lines.append(line.rstrip())
+                # Показываем вывод пользователю
+                if 'sqlmap' in command.lower():
+                    # Подсветка для sqlmap
+                    if 'vulnerable' in line.lower() or 'injectable' in line.lower():
+                        print(f"{Colors.GREEN}{line.rstrip()}{Colors.END}")
+                    elif 'error' in line.lower() or 'failed' in line.lower():
+                        print(f"{Colors.RED}{line.rstrip()}{Colors.END}")
+                    elif 'database' in line.lower() or 'table' in line.lower():
+                        print(f"{Colors.CYAN}{line.rstrip()}{Colors.END}")
+                    else:
+                        print(f"{Colors.DIM}{line.rstrip()}{Colors.END}")
+                else:
+                    print(line.rstrip())
+        
+        process.wait(timeout=timeout)
+        
+        return {
+            "success": process.returncode == 0,
+            "output": "\n".join(output_lines),
+            "return_code": process.returncode
+        }
+        
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        return {"success": False, "output": "\n".join(output_lines), "error": "Timeout"}
+    except Exception as e:
+        return {"success": False, "output": "", "error": str(e)}
+
+# ============================================================
+# АНАЛИЗ ВЫВОДА SQLMAP
+# ============================================================
+
+def analyze_sqlmap_output(output: str) -> dict:
+    """
+    ДЕТАЛЬНЫЙ анализ вывода sqlmap
+    Извлекает: найденные БД, таблицы, уязвимости, текущего пользователя
+    """
+    
+    analysis = {
+        "vulnerable": False,
+        "vulnerability_type": [],
+        "databases": [],
+        "tables": [],
+        "current_user": None,
+        "current_database": None,
+        "technique": [],
+        "payloads": [],
+        "summary": ""
+    }
+    
+    output_lower = output.lower()
+    
+    # 1. Проверка на наличие уязвимости
+    if "vulnerable" in output_lower or "injectable" in output_lower:
+        analysis["vulnerable"] = True
+        
+        # Определяем тип уязвимости
+        if "boolean-based blind" in output_lower:
+            analysis["vulnerability_type"].append("Boolean-based Blind SQLi")
+        if "time-based blind" in output_lower:
+            analysis["vulnerability_type"].append("Time-based Blind SQLi")
+        if "error-based" in output_lower:
+            analysis["vulnerability_type"].append("Error-based SQLi")
+        if "union" in output_lower:
+            analysis["vulnerability_type"].append("Union-based SQLi")
+        if "stacked queries" in output_lower:
+            analysis["vulnerability_type"].append("Stacked Queries")
+    
+    # 2. Поиск баз данных (разные форматы вывода sqlmap)
+    # Формат: [*] database_name
+    db_pattern1 = r'\[\*\*\]\s+(\w+)'
+    dbs1 = re.findall(db_pattern1, output)
+    
+    # Формат: [[ ]] database_name
+    db_pattern2 = r'\[\[\s*\]\]\s+(\w+)'
+    dbs2 = re.findall(db_pattern2, output)
+    
+    # Формат: | database_name |
+    db_pattern3 = r'\|\s+(\w+)\s+\|'
+    dbs3 = re.findall(db_pattern3, output)
+    
+    all_dbs = list(set(dbs1 + dbs2 + dbs3))
+    # Фильтруем системные БД
+    system_dbs = ['information_schema', 'mysql', 'performance_schema', 'sys']
+    analysis["databases"] = [db for db in all_dbs if db not in system_dbs]
+    
+    # 3. Поиск таблиц
+    table_pattern = r'\|\s+(\w+)\s+\|'
+    all_tables = re.findall(table_pattern, output)
+    # Фильтруем дубликаты
+    analysis["tables"] = list(set(all_tables))[:50]
+    
+    # 4. Поиск текущего пользователя
+    user_patterns = [
+        r'current user:\s*[\'"]?(\w+)[\'"]?',
+        r'\[current user:\s*(\w+)\]',
+        r'user:\s*(\w+)'
+    ]
+    for pattern in user_patterns:
+        match = re.search(pattern, output_lower)
+        if match:
+            analysis["current_user"] = match.group(1)
+            break
+    
+    # 5. Поиск текущей БД
+    db_patterns = [
+        r'current database:\s*[\'"]?(\w+)[\'"]?',
+        r'\[current database:\s*(\w+)\]',
+        r'database:\s*(\w+)'
+    ]
+    for pattern in db_patterns:
+        match = re.search(pattern, output_lower)
+        if match:
+            analysis["current_database"] = match.group(1)
+            break
+    
+    # 6. Поиск использованных техник
+    techniques = {
+        "B": "Boolean-based blind",
+        "T": "Time-based blind",
+        "E": "Error-based",
+        "U": "Union query",
+        "S": "Stacked queries"
+    }
+    tech_pattern = r'technique:\s*([BTEUS]+)'
+    tech_match = re.search(tech_pattern, output)
+    if tech_match:
+        for tech in tech_match.group(1):
+            if tech in techniques:
+                analysis["technique"].append(techniques[tech])
+    
+    # 7. Поиск примеров payload'ов
+    payload_pattern = r'Payload:\s*(.+?)(?:\n|$)'
+    payloads = re.findall(payload_pattern, output, re.IGNORECASE)
+    analysis["payloads"] = payloads[:5]  # Показываем максимум 5
+    
+    # 8. Формируем краткое резюме
+    if analysis["vulnerable"]:
+        analysis["summary"] = f"🔴 ОБНАРУЖЕНА SQL-ИНЪЕКЦИЯ! Тип: {', '.join(analysis['vulnerability_type'])}"
+        if analysis["databases"]:
+            analysis["summary"] += f" | Найдено БД: {len(analysis['databases'])}"
+        if analysis["tables"]:
+            analysis["summary"] += f" | Найдено таблиц: {len(analysis['tables'])}"
     else:
-        print(f"  {Colors.ICON_ERROR} {Colors.RED}✗{Colors.END} {item}: {Colors.RED}{message or 'FAILED'}{Colors.END}")
+        analysis["summary"] = "🟢 SQL-инъекция НЕ обнаружена"
+    
+    return analysis
 
-def print_section(title: str):
-    print(f"\n{Colors.BOLD}{Colors.CYAN}┌─────────────────────────────────────────────────────────────────────────┐{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.CYAN}│ {title}{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.CYAN}└─────────────────────────────────────────────────────────────────────────┘{Colors.END}")
+def print_sqlmap_report(analysis: dict):
+    """Красиво выводит отчёт по sqlmap"""
+    
+    print(f"\n{Colors.BOLD}{Colors.CYAN}═══════════════════════════════════════════════════════════════════════════{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.CYAN}📊 ОТЧЁТ SQLMAP{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.CYAN}═══════════════════════════════════════════════════════════════════════════{Colors.END}")
+    
+    # Статус
+    if analysis["vulnerable"]:
+        print(f"\n{Colors.ICON_VULN} {Colors.RED}{Colors.BOLD}СТАТУС: SQL-ИНЪЕКЦИЯ НАЙДЕНА!{Colors.END}")
+    else:
+        print(f"\n{Colors.ICON_SUCCESS} {Colors.GREEN}{Colors.BOLD}СТАТУС: SQL-инъекция не найдена{Colors.END}")
+    
+    # Типы уязвимостей
+    if analysis["vulnerability_type"]:
+        print(f"\n{Colors.ICON_VULN} {Colors.YELLOW}ТИПЫ УЯЗВИМОСТЕЙ:{Colors.END}")
+        for vuln in analysis["vulnerability_type"]:
+            print(f"   • {vuln}")
+    
+    # Базы данных
+    if analysis["databases"]:
+        print(f"\n{Colors.ICON_DB} {Colors.GREEN}НАЙДЕННЫЕ БАЗЫ ДАННЫХ:{Colors.END}")
+        for db in analysis["databases"][:20]:
+            print(f"   • {db}")
+        if len(analysis["databases"]) > 20:
+            print(f"   • ... и ещё {len(analysis['databases']) - 20} БД")
+    else:
+        if analysis["vulnerable"]:
+            print(f"\n{Colors.ICON_INFO} {Colors.YELLOW}БАЗЫ ДАННЫХ: не удалось извлечь (попробуйте --dbs){Colors.END}")
+        else:
+            print(f"\n{Colors.ICON_INFO} БАЗЫ ДАННЫХ: не найдены (уязвимость отсутствует)")
+    
+    # Таблицы
+    if analysis["tables"]:
+        print(f"\n{Colors.ICON_TABLE} {Colors.GREEN}НАЙДЕННЫЕ ТАБЛИЦЫ (первые 20):{Colors.END}")
+        for table in analysis["tables"][:20]:
+            print(f"   • {table}")
+    
+    # Информация о пользователе/БД
+    if analysis["current_user"]:
+        print(f"\n{Colors.ICON_INFO} {Colors.CYAN}ТЕКУЩИЙ ПОЛЬЗОВАТЕЛЬ БД:{Colors.END} {analysis['current_user']}")
+    if analysis["current_database"]:
+        print(f"{Colors.ICON_INFO} {Colors.CYAN}ТЕКУЩАЯ БАЗА ДАННЫХ:{Colors.END} {analysis['current_database']}")
+    
+    # Использованные техники
+    if analysis["technique"]:
+        print(f"\n{Colors.ICON_TOOL} {Colors.CYAN}ИСПОЛЬЗОВАННЫЕ ТЕХНИКИ:{Colors.END}")
+        for tech in analysis["technique"]:
+            print(f"   • {tech}")
+    
+    # Примеры payload'ов
+    if analysis["payloads"]:
+        print(f"\n{Colors.ICON_INFO} {Colors.DIM}ПРИМЕРЫ PAYLOAD'ОВ:{Colors.END}")
+        for payload in analysis["payloads"][:3]:
+            print(f"   {Colors.DIM}→ {payload[:80]}{Colors.END}")
+    
+    # Итог
+    print(f"\n{Colors.BOLD}{Colors.CYAN}═══════════════════════════════════════════════════════════════════════════{Colors.END}")
+    print(f"{Colors.BOLD}📊 {analysis['summary']}{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.CYAN}═══════════════════════════════════════════════════════════════════════════{Colors.END}\n")
 
 # ============================================================
-# ЗАПУСК УТИЛИТ В ОТДЕЛЬНЫХ ОКНАХ
+# ДРУГИЕ УТИЛИТЫ
 # ============================================================
 
-class TerminalWindow:
-    @staticmethod
-    def open_window(command: str, title: str = "DeepSeek Agent"):
-        print(f"\n{Colors.ICON_WINDOW} {Colors.CYAN}Открываю новое окно: {Colors.BOLD}{title}{Colors.END}")
-        print(f"{Colors.DIM}Команда: {command[:100]}{Colors.END}")
+def run_sqlmap_with_analysis(url: str, flags: str = "--batch --dbs") -> dict:
+    """
+    Запускает sqlmap и ВОЗВРАЩАЕТ анализ результата
+    """
+    command = f"sqlmap -u '{url}' {flags}"
+    result = run_command_with_output(command, timeout=1200)
+    
+    if result["success"] and result["output"]:
+        # Анализируем вывод
+        analysis = analyze_sqlmap_output(result["output"])
+        # Выводим красивый отчёт
+        print_sqlmap_report(analysis)
         
-        script_content = f"""#!/bin/bash
-echo "═══════════════════════════════════════════════════════════════════════════"
-echo "  {title}"
-echo "  Время: $(date)"
-echo "═══════════════════════════════════════════════════════════════════════════"
-echo ""
-{command}
-echo ""
-echo "═══════════════════════════════════════════════════════════════════════════"
-echo "  Процесс завершён. Нажмите Enter для закрытия окна..."
-read
-"""
-        
-        script_path = f"/tmp/deepseek_agent_{int(time.time())}.sh"
-        with open(script_path, 'w') as f:
-            f.write(script_content)
-        os.chmod(script_path, 0o755)
-        
-        if sys.platform == "linux":
-            terminals = [
-                ["gnome-terminal", "--", "bash", script_path],
-                ["konsole", "-e", "bash", script_path],
-                ["xfce4-terminal", "-e", f"bash {script_path}"],
-                ["terminator", "-e", f"bash {script_path}"],
-                ["xterm", "-e", f"bash {script_path}"],
-            ]
-            
-            for term_cmd in terminals:
-                try:
-                    subprocess.run(["which", term_cmd[0]], capture_output=True, check=True)
-                    subprocess.Popen(term_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    print(f"{Colors.ICON_SUCCESS} {Colors.GREEN}Окно открыто через: {term_cmd[0]}{Colors.END}")
-                    return
-                except:
-                    continue
-            
-            print(f"{Colors.ICON_WARNING} {Colors.YELLOW}Не удалось найти терминал. Запускаю в фоне...{Colors.END}")
-            subprocess.Popen(command, shell=True)
+        return {
+            "success": True,
+            "output": result["output"],
+            "analysis": analysis
+        }
+    else:
+        return {
+            "success": False,
+            "output": result.get("output", ""),
+            "error": result.get("error", "Не удалось выполнить sqlmap"),
+            "analysis": None
+        }
 
-class InteractiveCommand:
-    def __init__(self, command: str, timeout: int = 300, separate_window: bool = True, window_title: str = ""):
-        self.command = command
-        self.timeout = timeout
-        self.separate_window = separate_window
-        self.window_title = window_title or command[:50]
-        
-    def execute(self, on_output=None) -> dict:
-        if self.separate_window:
-            TerminalWindow.open_window(self.command, self.window_title)
-            return {
-                "success": True,
-                "output": f"Команда запущена в отдельном окне: {self.command}",
-                "window_opened": True
-            }
-        
-        print(f"\n{Colors.ICON_TERMINAL} {Colors.CYAN}Запуск:{Colors.END} {Colors.BOLD}{self.command}{Colors.END}")
-        print(f"{Colors.DIM}{'-' * 70}{Colors.END}")
-        
-        try:
-            process = subprocess.Popen(
-                self.command,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                universal_newlines=True,
-                executable='/bin/bash' if sys.platform != 'win32' else None
-            )
-            
-            output_lines = []
-            error_lines = []
-            
-            def read_stdout():
-                for line in iter(process.stdout.readline, ''):
-                    if line:
-                        output_lines.append(line.rstrip())
-                        if on_output:
-                            on_output(line.rstrip(), 'stdout')
-                        else:
-                            print(f"{Colors.DIM}{line.rstrip()}{Colors.END}")
-                process.stdout.close()
-            
-            def read_stderr():
-                for line in iter(process.stderr.readline, ''):
-                    if line:
-                        error_lines.append(line.rstrip())
-                        if on_output:
-                            on_output(line.rstrip(), 'stderr')
-                        else:
-                            print(f"{Colors.YELLOW}{line.rstrip()}{Colors.END}")
-                process.stderr.close()
-            
-            stdout_thread = threading.Thread(target=read_stdout)
-            stderr_thread = threading.Thread(target=read_stderr)
-            stdout_thread.start()
-            stderr_thread.start()
-            
-            try:
-                process.wait(timeout=self.timeout)
-            except subprocess.TimeoutExpired:
-                process.terminate()
-                process.wait()
-                return {"success": False, "output": "\n".join(output_lines), "error": "Timeout", "timed_out": True}
-            
-            stdout_thread.join(timeout=5)
-            stderr_thread.join(timeout=5)
-            
-            return {
-                "success": process.returncode == 0,
-                "output": "\n".join(output_lines),
-                "error": "\n".join(error_lines) if error_lines else None,
-                "return_code": process.returncode
-            }
-        except Exception as e:
-            return {"success": False, "output": "", "error": str(e)}
+def run_nmap(target: str, flags: str = "-sV") -> dict:
+    command = f"nmap {flags} {target}"
+    return run_command_with_output(command, timeout=600)
 
-# ============================================================
-# УТИЛИТЫ ДЛЯ KALI LINUX
-# ============================================================
-
-class KaliTools:
-    @staticmethod
-    def run_nmap(target: str, flags: str = "-sV") -> dict:
-        cmd = f"nmap {flags} {target}"
-        return InteractiveCommand(cmd, timeout=TIMEOUTS["nmap"], separate_window=USE_SEPARATE_WINDOWS, window_title=f"Nmap: {target}").execute()
-    
-    @staticmethod
-    def run_sqlmap(url: str, flags: str = "--batch --dbs") -> dict:
-        cmd = f"sqlmap -u '{url}' {flags}"
-        return InteractiveCommand(cmd, timeout=TIMEOUTS["sqlmap"], separate_window=USE_SEPARATE_WINDOWS, window_title=f"SQLMap: {url[:50]}").execute()
-    
-    @staticmethod
-    def run_gobuster(url: str, wordlist: str = None) -> dict:
-        if not wordlist:
-            wordlist = WORDLISTS["dirb_common"]
-        cmd = f"gobuster dir -u {url} -w {wordlist}"
-        return InteractiveCommand(cmd, timeout=TIMEOUTS["gobuster"], separate_window=USE_SEPARATE_WINDOWS, window_title=f"GoBuster: {url}").execute()
-    
-    @staticmethod
-    def run_nikto(target: str) -> dict:
-        cmd = f"nikto -h {target}"
-        return InteractiveCommand(cmd, timeout=TIMEOUTS["nikto"], separate_window=USE_SEPARATE_WINDOWS, window_title=f"Nikto: {target}").execute()
-    
-    @staticmethod
-    def run_whatweb(target: str) -> dict:
-        cmd = f"whatweb {target}"
-        return InteractiveCommand(cmd, timeout=TIMEOUTS["whatweb"], separate_window=USE_SEPARATE_WINDOWS, window_title=f"WhatWeb: {target}").execute()
-    
-    @staticmethod
-    def run_custom_command(command: str) -> dict:
-        return InteractiveCommand(command, timeout=TIMEOUTS["default"], separate_window=USE_SEPARATE_WINDOWS, window_title="Custom Command").execute()
-
-# ============================================================
-# АНАЛИЗ ВЫВОДА
-# ============================================================
-
-class OutputAnalyzer:
-    @staticmethod
-    def analyze_nmap_output(output: str) -> dict:
-        analysis = {"open_ports": [], "services": [], "summary": ""}
-        port_pattern = r'(\d+)/tcp\s+open\s+(\w+)'
-        for match in re.finditer(port_pattern, output):
-            analysis["open_ports"].append({"port": match.group(1), "service": match.group(2)})
-        analysis["summary"] = f"Найдено {len(analysis['open_ports'])} открытых портов"
-        return analysis
-    
-    @staticmethod
-    def analyze_sqlmap_output(output: str) -> dict:
-        analysis = {"vulnerable": False, "databases": [], "summary": ""}
-        if "vulnerable" in output.lower():
-            analysis["vulnerable"] = True
-        db_pattern = r'\[\*\*\]\s+(\w+)'
-        dbs = re.findall(db_pattern, output)
-        if not dbs:
-            dbs = re.findall(r'\[\[\s*\]\]\s*(\w+)', output)
-        analysis["databases"] = list(set(dbs))[:30]
-        analysis["summary"] = f"SQL-инъекция {'найдена' if analysis['vulnerable'] else 'не обнаружена'}. БД: {len(analysis['databases'])}"
-        return analysis
-    
-    @staticmethod
-    def analyze_gobuster_output(output: str) -> dict:
-        analysis = {"directories": [], "summary": ""}
-        dir_pattern = r'/(\S+)\s+\(Status:\s+(\d+)\)'
-        for match in re.finditer(dir_pattern, output):
-            analysis["directories"].append({"path": match.group(1), "status": match.group(2)})
-        analysis["summary"] = f"Найдено {len(analysis['directories'])} директорий"
-        return analysis
+def run_gobuster(url: str, wordlist: str = "/usr/share/wordlists/dirb/common.txt") -> dict:
+    command = f"gobuster dir -u {url} -w {wordlist}"
+    return run_command_with_output(command, timeout=600)
 
 # ============================================================
 # ИНСТРУМЕНТЫ ДЛЯ API
 # ============================================================
 
 TOOLS = [
-    {"type": "function", "function": {"name": "run_nmap", "description": "Запускает nmap", "parameters": {"type": "object", "properties": {"target": {"type": "string"}, "flags": {"type": "string", "default": "-sV"}}, "required": ["target"]}}},
-    {"type": "function", "function": {"name": "run_sqlmap", "description": "Запускает sqlmap", "parameters": {"type": "object", "properties": {"url": {"type": "string"}, "flags": {"type": "string", "default": "--batch --dbs"}}, "required": ["url"]}}},
-    {"type": "function", "function": {"name": "run_gobuster", "description": "Запускает gobuster", "parameters": {"type": "object", "properties": {"url": {"type": "string"}, "wordlist": {"type": "string"}}, "required": ["url"]}}},
-    {"type": "function", "function": {"name": "run_nikto", "description": "Запускает nikto", "parameters": {"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]}}},
-    {"type": "function", "function": {"name": "run_whatweb", "description": "Запускает whatweb", "parameters": {"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]}}},
-    {"type": "function", "function": {"name": "run_custom_command", "description": "Выполняет команду", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}
+    {
+        "type": "function",
+        "function": {
+            "name": "run_sqlmap",
+            "description": "Запускает sqlmap, АНАЛИЗИРУЕТ вывод и возвращает отчёт с найденными БД, таблицами, уязвимостями",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Целевой URL с параметром"},
+                    "flags": {"type": "string", "description": "Дополнительные флаги", "default": "--batch --dbs"}
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_nmap",
+            "description": "Запускает nmap сканирование",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string"},
+                    "flags": {"type": "string", "default": "-sV"}
+                },
+                "required": ["target"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_gobuster",
+            "description": "Запускает gobuster для поиска директорий",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "wordlist": {"type": "string", "default": "/usr/share/wordlists/dirb/common.txt"}
+                },
+                "required": ["url"]
+            }
+        }
+    }
 ]
 
 def execute_tool(tool_name: str, parameters: dict) -> str:
     try:
-        if tool_name == "run_nmap":
-            result = KaliTools.run_nmap(parameters["target"], parameters.get("flags", "-sV"))
-        elif tool_name == "run_sqlmap":
-            result = KaliTools.run_sqlmap(parameters["url"], parameters.get("flags", "--batch --dbs"))
+        if tool_name == "run_sqlmap":
+            result = run_sqlmap_with_analysis(
+                parameters["url"],
+                parameters.get("flags", "--batch --dbs")
+            )
+            return json.dumps({
+                "success": result["success"],
+                "summary": result.get("analysis", {}).get("summary", ""),
+                "vulnerable": result.get("analysis", {}).get("vulnerable", False),
+                "databases": result.get("analysis", {}).get("databases", []),
+                "tables": result.get("analysis", {}).get("tables", [])[:20]
+            }, ensure_ascii=False, indent=2)
+        
+        elif tool_name == "run_nmap":
+            result = run_nmap(parameters["target"], parameters.get("flags", "-sV"))
+            return json.dumps({"success": result["success"], "output": result["output"][:2000]}, ensure_ascii=False)
+        
         elif tool_name == "run_gobuster":
-            result = KaliTools.run_gobuster(parameters["url"], parameters.get("wordlist"))
-        elif tool_name == "run_nikto":
-            result = KaliTools.run_nikto(parameters["target"])
-        elif tool_name == "run_whatweb":
-            result = KaliTools.run_whatweb(parameters["target"])
-        elif tool_name == "run_custom_command":
-            result = KaliTools.run_custom_command(parameters["command"])
-        else:
-            return f"Неизвестный инструмент: {tool_name}"
-        return json.dumps(result, ensure_ascii=False, indent=2)
+            result = run_gobuster(parameters["url"], parameters.get("wordlist", "/usr/share/wordlists/dirb/common.txt"))
+            return json.dumps({"success": result["success"], "output": result["output"][:2000]}, ensure_ascii=False)
+        
+        return f"Неизвестный инструмент: {tool_name}"
     except Exception as e:
         return json.dumps({"error": str(e), "success": False})
-
-# ============================================================
-# ИНИЦИАЛИЗАЦИЯ И ПРОВЕРКИ
-# ============================================================
-
-def initialize_agent() -> tuple:
-    """Инициализация агента с проверками"""
-    errors = []
-    
-    print_section(f"{Colors.ICON_LOADING} ПРОВЕРКА ИНИЦИАЛИЗАЦИИ")
-    
-    # 1. Проверка Python
-    print(f"\n{Colors.BOLD}📌 СИСТЕМНЫЕ ТРЕБОВАНИЯ:{Colors.END}")
-    py_ok = sys.version_info >= (3, 8)
-    print_check("Python версия", py_ok, f"{sys.version_info.major}.{sys.version_info.minor}")
-    if not py_ok:
-        errors.append("Python 3.8+ required")
-    
-    # 2. Проверка API ключа
-    print(f"\n{Colors.BOLD}🔑 API НАСТРОЙКИ:{Colors.END}")
-    if not OPENROUTER_API_KEY:
-        errors.append("API ключ не найден в файле .env")
-        print_check("OpenRouter API Key", False, "не найден")
-    elif not OPENROUTER_API_KEY.startswith("sk-or-v1-"):
-        errors.append("Неверный формат API ключа")
-        print_check("OpenRouter API Key", False, "неверный формат")
-    else:
-        print_check("OpenRouter API Key", True, "найден")
-    
-    # 3. Проверка подключения
-    if OPENROUTER_API_KEY and OPENROUTER_API_KEY.startswith("sk-or-v1-"):
-        print(f"\n{Colors.BOLD}🌐 ПРОВЕРКА ПОДКЛЮЧЕНИЯ:{Colors.END}")
-        print(f"  {Colors.ICON_LOADING} {Colors.BLUE}Тестирование...{Colors.END}")
-        
-        try:
-            client = openai.OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1", timeout=10)
-            response = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[{"role": "user", "content": "ping"}],
-                max_tokens=1,
-                temperature=0.0
-            )
-            print_check("API Connection", True, "успешно")
-        except openai.APIStatusError as e:
-            if e.status_code == 402:
-                print_check("API Connection", False, "недостаточно средств на балансе")
-                errors.append("Пополните баланс на https://openrouter.ai/credits")
-            else:
-                print_check("API Connection", False, str(e)[:50])
-                errors.append(f"API ошибка: {e.status_code}")
-        except Exception as e:
-            print_check("API Connection", False, str(e)[:50])
-            errors.append(f"Ошибка подключения: {str(e)[:50]}")
-    
-    return len(errors) == 0, errors
 
 # ============================================================
 # ОСНОВНОЙ КЛАСС АГЕНТА
@@ -410,18 +449,11 @@ def initialize_agent() -> tuple:
 
 class DeepSeekAgent:
     def __init__(self):
-        self.client = None
-        self.messages = []
-        
-    def setup(self):
-        if not OPENROUTER_API_KEY:
-            return False
         self.client = openai.OpenAI(
             api_key=OPENROUTER_API_KEY,
             base_url="https://openrouter.ai/api/v1",
         )
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        return True
     
     def process(self, user_input: str) -> str:
         self.messages.append({"role": "user", "content": user_input})
@@ -477,67 +509,47 @@ class DeepSeekAgent:
 # ЗАПУСК
 # ============================================================
 
+def print_banner():
+    os.system('clear' if sys.platform != 'win32' else 'cls')
+    print(f"""{Colors.BOLD}{Colors.CYAN}
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    🤖 DEEPSEEK AGENT - АНАЛИЗАТОР 🤖                       ║
+║                    📊 Автоматический анализ вывода утилит 📊               ║
+╚═══════════════════════════════════════════════════════════════════════════╝{Colors.END}
+    """)
+    print(f"{Colors.ICON_INFO} Агент анализирует вывод sqlmap и показывает:")
+    print(f"   • Найдены ли SQL-инъекции")
+    print(f"   • Какие базы данных обнаружены")
+    print(f"   • Какие таблицы найдены")
+    print(f"   • Типы уязвимостей")
+    print()
+
 def main():
     print_banner()
-    
-    # Инициализация
-    success, errors = initialize_agent()
-    
-    if not success:
-        print_section(f"{Colors.ICON_ERROR} ОШИБКА ИНИЦИАЛИЗАЦИИ")
-        print(f"\n  {Colors.ICON_ERROR} {Colors.RED}Агент не может запуститься:{Colors.END}")
-        for error in errors:
-            print(f"    • {error}")
-        print(f"\n  {Colors.ICON_INFO} Создайте файл .env с содержимым:")
-        print(f"  OPENROUTER_API_KEY=sk-or-v1-ваш_ключ")
-        print(f"\n  {Colors.ICON_INFO} Получить ключ: https://openrouter.ai/keys")
-        sys.exit(1)
-    
-    # Создаём агента
     agent = DeepSeekAgent()
-    if not agent.setup():
-        print(f"\n{Colors.ICON_ERROR} {Colors.RED}Не удалось создать клиент API{Colors.END}")
-        sys.exit(1)
     
-    print_section(f"{Colors.ICON_SUCCESS} ИНИЦИАЛИЗАЦИЯ ЗАВЕРШЕНА")
-    print(f"\n  {Colors.ICON_AGENT} {Colors.GREEN}Агент успешно запущен!{Colors.END}")
-    print(f"  {Colors.ICON_INFO} Модель: {MODEL_NAME}")
-    print(f"  {Colors.ICON_WINDOW} Режим окон: {'ВКЛЮЧЁН' if USE_SEPARATE_WINDOWS else 'ВЫКЛЮЧЕН'}")
-    print(f"\n  {Colors.ICON_INFO} Введите /help для справки, /exit для выхода")
+    print(f"{Colors.ICON_AGENT} {Colors.GREEN}Агент запущен!{Colors.END}")
+    print(f"{Colors.ICON_INFO} Просто скажите: {Colors.YELLOW}запусти sqlmap на http://testphp.vulnweb.com/artists.php?artist=1{Colors.END}")
+    print(f"{Colors.ICON_INFO} Для выхода введите: exit\n")
     
-    # Основной цикл
     while True:
         try:
-            user_input = input(f"\n{Colors.BOLD}{Colors.GREEN}┌─[{Colors.ICON_USER}]{Colors.END} ").strip()
+            user_input = input(f"{Colors.BOLD}{Colors.GREEN}┌─[{Colors.ICON_USER}]{Colors.END} ").strip()
             
-            if user_input.lower() in ['/exit', 'exit', 'quit']:
+            if user_input.lower() in ['exit', 'quit']:
                 print(f"\n{Colors.ICON_AGENT} {Colors.GREEN}До свидания!{Colors.END}\n")
                 break
             
             if user_input.lower() == '/clear':
+                agent.clear()
                 os.system('clear' if sys.platform != 'win32' else 'cls')
                 print_banner()
-                agent.clear()
-                continue
-            
-            if user_input.lower() == '/help':
-                print(f"""
-{Colors.BOLD}📖 КОМАНДЫ:{Colors.END}
-  /help     - Эта справка
-  /clear    - Очистить экран
-  /exit     - Выйти
-
-{Colors.BOLD}💡 ПРИМЕРЫ ЗАПРОСОВ:{Colors.END}
-  "Просканируй nmap localhost"
-  "Запусти sqlmap на http://testphp.vulnweb.com/artists.php?artist=1"
-  "Проверь директории на example.com через gobuster"
-                """)
                 continue
             
             if not user_input:
                 continue
             
-            print(f"\n{Colors.ICON_AGENT} {Colors.BLUE}Обработка запроса...{Colors.END}")
+            print(f"\n{Colors.ICON_AGENT} {Colors.BLUE}Обработка...{Colors.END}")
             response = agent.process(user_input)
             
             print(f"\n{Colors.BOLD}{Colors.GREEN}┌─────────────────────────────────────────────────────────────────────────┐{Colors.END}")
@@ -546,13 +558,11 @@ def main():
             for line in response.split('\n'):
                 if line.strip():
                     print(f"{Colors.DIM}│{Colors.END} {line}")
-            print(f"{Colors.BOLD}{Colors.GREEN}└─────────────────────────────────────────────────────────────────────────┘{Colors.END}")
+            print(f"{Colors.BOLD}{Colors.GREEN}└─────────────────────────────────────────────────────────────────────────┘{Colors.END}\n")
             
         except KeyboardInterrupt:
-            print(f"\n\n{Colors.ICON_WARNING} {Colors.YELLOW}Прервано (Ctrl+C){Colors.END}")
+            print(f"\n\n{Colors.ICON_WARNING} {Colors.YELLOW}Прервано{Colors.END}")
             continue
-        except Exception as e:
-            print(f"\n{Colors.ICON_ERROR} {Colors.RED}Ошибка: {e}{Colors.END}")
 
 if __name__ == "__main__":
     main()
