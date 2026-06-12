@@ -110,7 +110,16 @@ for arg in args:
 ║    jim -u, --update                 → Обновить из GitHub           ║
 ║                                                                    ║
 ║  Интерактивные команды:                                            ║
-║    status, stop, report, save, history, reset, help               ║
+║    /status, /stats   - статус сессии                               ║
+║    /stop, /pause     - приостановить                               ║
+║    /continue, /resume- возобновить                                 ║
+║    /report, /summary - итоговый отчёт                              ║
+║    /save, /export    - сохранить сессию                            ║
+║    /history, /log    - история сканирований                        ║
+║    /context, /targets- показать сохранённые цели                   ║
+║    /reset, /clear    - очистить память                             ║
+║    /help, /?         - справка                                     ║
+║    /exit, /quit      - выход                                       ║
 ║                                                                    ║
 ╚════════════════════════════════════════════════════════════════════╝
 """)
@@ -464,7 +473,7 @@ class TargetAnalyzer:
         return result
 
 # ============================================================
-# АНАЛИЗ ВЫВОДА (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+# АНАЛИЗ ВЫВОДА
 # ============================================================
 
 class OutputAnalyzer:
@@ -491,12 +500,10 @@ class OutputAnalyzer:
     
     @staticmethod
     def analyze_sqlmap(output: str) -> Dict[str, Any]:
-        """Анализирует вывод sqlmap - корректно определяет наличие инъекции"""
         analysis = {"found": False, "summary": "", "details": [], "insights": []}
         
         output_lower = output.lower()
         
-        # Индикаторы ОТСУТСТВИЯ уязвимости
         not_found_indicators = [
             "does not appear to be injectable",
             "all tested parameters do not appear to be injectable",
@@ -506,7 +513,6 @@ class OutputAnalyzer:
             "no parameter seems to be injectable"
         ]
         
-        # Индикаторы НАЛИЧИЯ уязвимости
         found_indicators = [
             "parameter .* is vulnerable",
             "vulnerable to sql injection",
@@ -517,7 +523,6 @@ class OutputAnalyzer:
             "current database:"
         ]
         
-        # Сначала проверяем что уязвимость НЕ найдена
         is_not_found = any(re.search(pattern, output_lower) for pattern in not_found_indicators)
         
         if is_not_found:
@@ -535,7 +540,6 @@ class OutputAnalyzer:
             
             return analysis
         
-        # Проверяем на наличие уязвимости
         is_found = any(re.search(pattern, output_lower) for pattern in found_indicators)
         
         if is_found:
@@ -555,7 +559,6 @@ class OutputAnalyzer:
                 analysis["details"].append("Тип: Error-based SQLi")
                 analysis["insights"].append("🎯 Error-based: Утечка данных через ошибки БД")
             
-            # Поиск баз данных
             dbs = re.findall(r'\[\*\*\]\s+(\w+)', output)
             if not dbs:
                 dbs = re.findall(r'\[\[\s*\]\]\s+(\w+)', output)
@@ -566,18 +569,14 @@ class OutputAnalyzer:
                     analysis["details"].append(f"Найдены базы данных: {', '.join(user_dbs[:5])}")
                     analysis["insights"].append(f"📊 Обнаружено {len(user_dbs)} пользовательских БД")
             
-            # Поиск текущего пользователя
             user_match = re.search(r'current user:\s*[\'"]?(\w+)[\'"]?', output_lower)
             if user_match:
                 analysis["insights"].append(f"👤 Пользователь БД: {user_match.group(1)}")
         else:
             analysis["found"] = False
             analysis["summary"] = "🛡️ SQL-инъекция НЕ обнаружена"
-            
             if "waf" in output_lower:
                 analysis["insights"].append("🛡️ Обнаружена WAF защита")
-            if "429" in output:
-                analysis["insights"].append("⚠️ Активно ограничение запросов")
         
         return analysis
     
@@ -636,52 +635,63 @@ class OutputAnalyzer:
     
     @staticmethod
     def analyze_whatweb(output: str) -> Dict[str, Any]:
+        """Анализирует вывод whatweb - игнорирует ошибки и мусор"""
         analysis = {"found": False, "summary": "", "details": [], "insights": []}
         
-        # Очищаем вывод от мусорных символов
         clean_output = re.sub(r'\x1b\[[0-9;]*m', '', output)
+        
+        # Слова для игнорирования
+        ignore_words = [
+            '429', 'Too Many Requests', 'hcdn', 'cloudflare', 'ddos', 'guard',
+            '403', '404', '500', 'Forbidden', 'Not Found', 'Error',
+            'HTTPServer', 'UncommonHeaders', 'x-hcdn', 'alt-svc', 'panel', 'platform'
+        ]
         
         # Ищем технологии в квадратных скобках
         techs = re.findall(r'\[(.*?)\]', clean_output)
         clean_techs = []
+        
         for t in techs:
             t_clean = t.strip()
-            # Фильтруем мусор
-            if (len(t_clean) < 50 and 
-                'http' not in t_clean.lower() and 
-                'm' not in t_clean and
-                '[' not in t_clean and
-                ']' not in t_clean and
+            if any(ignore in t_clean for ignore in ignore_words):
+                continue
+            if (len(t_clean) < 60 and len(t_clean) > 1 and
+                'http' not in t_clean.lower() and 'm' not in t_clean and
+                '[' not in t_clean and ']' not in t_clean and
                 t_clean not in clean_techs):
                 clean_techs.append(t_clean)
         
-        # Также ищем прямые упоминания технологий
-        direct_techs = re.findall(r'(Apache|nginx|IIS|PHP|Python|Ruby|Node\.js|WordPress|Joomla|Drupal|Magento)', clean_output, re.IGNORECASE)
-        for tech in direct_techs:
+        # Ищем реальные технологии
+        real_techs = re.findall(r'(?i)(Apache|nginx|IIS|PHP|Python|Ruby|Node\.js|WordPress|Joomla|Drupal|Magento|MySQL|PostgreSQL|Redis|MongoDB)', clean_output)
+        for tech in real_techs:
             if tech not in clean_techs:
                 clean_techs.append(tech)
+        
+        # Ищем IP
+        ip_match = re.search(r'IP\[([0-9.]+)\]', clean_output)
+        if ip_match and not clean_techs:
+            analysis["insights"].append(f"🌐 IP сервера: {ip_match.group(1)}")
         
         if clean_techs:
             analysis["found"] = True
             analysis["summary"] = f"🔧 Обнаружено {len(clean_techs)} технологий"
-            for t in clean_techs[:15]:
+            for t in clean_techs[:10]:
                 analysis["details"].append(t)
             
-            cms_list = ['WordPress', 'Joomla', 'Drupal', 'Magento']
-            for tech in clean_techs:
-                if tech in cms_list:
-                    analysis["insights"].append(f"📰 Обнаружена CMS: {tech}")
-                elif 'nginx' in tech.lower():
-                    analysis["insights"].append("⚡ Обнаружен Nginx")
-                elif 'apache' in tech.lower():
-                    analysis["insights"].append("🔄 Обнаружен Apache")
-                elif 'php' in tech.lower():
-                    analysis["insights"].append("🐘 Обнаружен PHP")
+            if 'WordPress' in clean_techs:
+                analysis["insights"].append("📰 Обнаружен WordPress - можно запустить wpscan")
+            if 'nginx' in str(clean_techs).lower():
+                analysis["insights"].append("⚡ Обнаружен Nginx")
+            if 'apache' in str(clean_techs).lower():
+                analysis["insights"].append("🔄 Обнаружен Apache")
+            if 'php' in str(clean_techs).lower():
+                analysis["insights"].append("🐘 Обнаружен PHP")
         else:
-            analysis["summary"] = "❓ Технологии не определены"
-            ip_match = re.search(r'IP\[([0-9.]+)\]', clean_output)
-            if ip_match:
-                analysis["insights"].append(f"🌐 IP сервера: {ip_match.group(1)}")
+            if '429' in output:
+                analysis["summary"] = "⚠️ Сайт ограничивает количество запросов (429)"
+                analysis["insights"].append("💡 Попробуйте позже или используйте --delay")
+            else:
+                analysis["summary"] = "❓ Технологии не определены"
         
         return analysis
 
@@ -1000,15 +1010,41 @@ class JimAgent:
         self.profile = PROFILE
         self.dry_run = DRY_RUN
         self.auto_mode = AUTO_MODE
+        self.context_targets = []  # Сохранённые цели
     
     def process(self, user_input: str) -> str:
+        # Обработка команд
         if user_input.startswith('/'):
             return self._handle_command(user_input)
+        
+        # Сохраняем все URL из запроса в контекст
+        url_pattern = r'https?://[^\s]+|[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}[^\s]*'
+        found_urls = re.findall(url_pattern, user_input)
+        for url in found_urls:
+            if url not in self.context_targets:
+                self.context_targets.append(url)
+        
+        # Если пользователь ссылается на "сайт авторизации" или "админку"
+        if any(word in user_input.lower() for word in ['авторизац', 'админ', 'admin', 'форма', 'login']):
+            admin_urls = [t for t in self.context_targets if 'admin' in t.lower() or 'login' in t.lower()]
+            if admin_urls:
+                user_input = f"Проверь {admin_urls[0]}. " + user_input
+                UI.info(f"Использую сохранённую цель: {admin_urls[0]}")
+        
+        # Если пользователь говорит "запусти поиск" без указания URL
+        if any(word in user_input.lower() for word in ['запусти', 'найди', 'проверь', 'поиск', 'найди']) and not found_urls:
+            if self.context_targets:
+                user_input = f"Проверь {self.context_targets[0]}. " + user_input
+                UI.info(f"Использую сохранённую цель: {self.context_targets[0]}")
         
         UI.loading_animation("Анализ цели...", 0.3)
         analysis = TargetAnalyzer.analyze(user_input)
         
         if not analysis["target"]:
+            # Показываем сохранённые цели
+            if self.context_targets:
+                UI.info(f"Доступные цели: {', '.join(self.context_targets)}")
+                return "❌ Не удалось определить цель. Укажите IP-адрес или URL из списка выше."
             return "❌ Не удалось определить цель. Укажите IP-адрес или URL."
         
         self.session = JimSession(analysis["target"])
@@ -1071,6 +1107,14 @@ class JimAgent:
                     break
         
         self.session.print_final_report()
+        
+        # Предлагаем проверить другие сохранённые цели
+        if self.context_targets and len(self.context_targets) > 1:
+            other_targets = [t for t in self.context_targets if t != target]
+            if other_targets:
+                UI.info(f"У вас есть другие цели: {', '.join(other_targets)}")
+                UI.info(f"Введите /context для просмотра всех целей")
+        
         return "✅ Оценка завершена"
     
     def _run_tool(self, tool: str, target: str, keywords: List[str]) -> Dict:
@@ -1204,13 +1248,19 @@ class JimAgent:
                 return ""
             return "ℹ️ Нет истории сессии"
         
+        elif cmd in ["context", "targets"]:
+            if self.context_targets:
+                print(f"\n{Colors.BOLD}📋 Сохранённые цели:{Colors.END}")
+                for i, t in enumerate(self.context_targets, 1):
+                    print(f"  {i}. {t}")
+                return ""
+            return "ℹ️ Нет сохранённых целей"
+        
         elif cmd in ["reset", "clear_memory", "forget", "clear"]:
-            # Очищаем историю сообщений
             self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-            # Очищаем текущую сессию
             if self.session:
                 self.session = None
-            # Сбрасываем глобальное состояние
+            self.context_targets = []
             global interrupted, current_process
             interrupted = False
             if current_process:
@@ -1219,7 +1269,6 @@ class JimAgent:
                     current_process = None
                 except:
                     pass
-            # Очищаем экран если указано
             if 'screen' in command.lower() or 'cls' in command.lower():
                 os.system('clear')
                 print_banner()
@@ -1231,8 +1280,8 @@ class JimAgent:
 {Colors.BOLD}{Colors.CYAN}║                                                                    ║{Colors.END}
 {Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} История диалога очищена                                    ║{Colors.END}
 {Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} Контекст сессии очищен                                      ║{Colors.END}
+{Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} Сохранённые цели очищены                                    ║{Colors.END}
 {Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} Активные сканирования остановлены                            ║{Colors.END}
-{Colors.BOLD}{Colors.CYAN}║  {Colors.GREEN}✅{Colors.END} Память агента сброшена к заводским настройкам                ║{Colors.END}
 {Colors.BOLD}{Colors.CYAN}║                                                                    ║{Colors.END}
 {Colors.BOLD}{Colors.CYAN}║  {Colors.ICON_INFO} Jim готов к новым целям!                                   ║{Colors.END}
 {Colors.BOLD}{Colors.CYAN}║                                                                    ║{Colors.END}
@@ -1245,20 +1294,22 @@ class JimAgent:
 ╠════════════════════════════════════════════════════════════════════╣
 ║                                                                    ║
 ║  УПРАВЛЕНИЕ СЕССИЕЙ:                                              ║
-║    /status, /stats   - Показать статус текущей сессии             ║
+║    /status, /stats   - Статус текущей сессии                      ║
 ║    /stop, /pause     - Приостановить сканирование                 ║
 ║    /continue, /resume- Возобновить сканирование                   ║
 ║    /reset, /clear    - Очистить ВСЮ память и контекст             ║
-║    /reset screen     - Очистить память И экран                    ║
 ║                                                                    ║
 ║  ОТЧЁТЫ:                                                          ║
-║    /report, /summary - Показать итоговый отчёт                    ║
-║    /save, /export    - Сохранить текущую сессию                   ║
-║    /history, /log    - Показать историю сканирований              ║
+║    /report, /summary - Итоговый отчёт                             ║
+║    /save, /export    - Сохранить сессию                           ║
+║    /history, /log    - История сканирований                       ║
+║                                                                    ║
+║  КОНТЕКСТ:                                                        ║
+║    /context, /targets- Показать сохранённые цели                  ║
 ║                                                                    ║
 ║  ПРОЧЕЕ:                                                          ║
-║    /help, /?         - Показать эту справку                       ║
-║    /exit, /quit      - Выйти из Jim                               ║
+║    /help, /?         - Справка                                    ║
+║    /exit, /quit      - Выход                                      ║
 ║                                                                    ║
 ║  💡 Примеры:                                                      ║
 ║    > Проверь сайт example.com на уязвимости                       ║
@@ -1300,7 +1351,7 @@ def print_banner():
     print(f"{Colors.CYAN}{banner}{Colors.END}")
     print(f"{Colors.DIM}{'='*70}{Colors.END}")
     print(f"{Colors.ICON_ROCKET} {Colors.GREEN}Jim инициализирован{Colors.END} | {Colors.ICON_SHIELD} Готов к работе")
-    print(f"{Colors.ICON_INFO} Команды: {Colors.YELLOW}/help{Colors.END} | {Colors.YELLOW}/status{Colors.END} | {Colors.YELLOW}/reset{Colors.END} | {Colors.YELLOW}/exit{Colors.END}")
+    print(f"{Colors.ICON_INFO} Команды: {Colors.YELLOW}/help{Colors.END} | {Colors.YELLOW}/status{Colors.END} | {Colors.YELLOW}/context{Colors.END} | {Colors.YELLOW}/exit{Colors.END}")
     print(f"{Colors.ICON_FLAG} Профиль: {Colors.BOLD}{PROFILE}{Colors.END} | Режим: {Colors.BOLD}{'Авто' if AUTO_MODE else 'Интерактивный'}{Colors.END}")
     print(f"{Colors.DIM}{'='*70}{Colors.END}")
 
