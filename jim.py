@@ -309,6 +309,7 @@ def is_static_file(target: str) -> bool:
 
 API_KEY = load_api_key()
 SYSTEM_PROMPT = load_system_prompt()
+CHAT_PROMPT = "Ты - Jim, интеллектуальный ИИ-агент для пентеста. Отвечай прямо и понятно на вопросы пользователя. Не используй JSON для обычных диалогов."
 ensure_directories()
 
 # ============================================================
@@ -844,8 +845,19 @@ class IntentAnalyzer:
         
         # Если нет URL, но есть в контексте
         if not result["target"] and context_targets:
-            result["target"] = context_targets[-1]
+            context_related = any(word in user_lower for word in ['цель', 'сайт', 'admin', 'админ', 'url', 'домен', 'адрес', 'веб', 'site'])
+            scan_request = any(word in user_lower for word in ['проверь', 'провер', 'скан', 'проскан', 'запусти', 'проанализируй', 'пентест', 'аудит', 'проведи', 'найди', 'ищи', 'продолжай', 'еще', 'далее'])
+            if context_related or scan_request:
+                result["target"] = context_targets[-1]
         
+        # Если это вопрос о предыдущем результате, не запускаем новый скан.
+        follow_up = any(q in user_lower for q in ['что', 'какая', 'какие', 'где', 'покажи', 'расскажи', 'итог', 'результат']) and any(t in user_lower for t in ['уязвим', 'уязвимость', 'результат', 'найден', 'обнаруж'])
+        if follow_up and not any(word in user_lower for word in ['проверь', 'провер', 'скан', 'проскан', 'запусти', 'проанализируй']):
+            result["intent"] = "status_query"
+            result["tools"] = []
+            result["explanation"] = "Запрос текущего состояния или результатов предыдущей сессии"
+            return result
+
         # Анализ намерения
         if any(word in user_lower for word in ['sql', 'инъекц', 'sqlmap', 'проверь sql', 'найди sql', 'sql-инъекц']):
             result["intent"] = "sql_injection"
@@ -862,13 +874,10 @@ class IntentAnalyzer:
             result["tools"].append("gobuster")
             result["explanation"] = "Поиск директорий"
         
-        elif any(word in user_lower for word in ['уязвим', 'nikto', 'проверь сайт', 'проверь на уязвимости', 'пентест', 'аудит', 'ищи уязвимости']):
+        elif any(word in user_lower for word in ['nikto', 'проверь сайт', 'проверь на уязвимости', 'пентест', 'аудит', 'ищи уязвимости']):
             result["intent"] = "web_vulnerability"
             result["tools"].append("nikto")
-            result["explanation"] = "Проверка веб-уязвимостей"
-        
-        elif any(word in user_lower for word in ['просканируй', 'проверь', 'протестируй', 'посмотри', 'анализ', 'оцен', 'аудит', 'сделай аудит', 'посмотри сайт', 'проведи проверку']):
-            result["intent"] = "general_scan"
+            result["explanation"] = "Проверка веб-уязимостей"
             result["tools"].append("whatweb")
             result["explanation"] = "Общее сканирование"
             if result["has_params"] and not is_admin_path(result["target"]) and not is_static_file(result["target"]):
@@ -1008,21 +1017,22 @@ class JimAgent:
             base_url="https://openrouter.ai/api/v1",
         )
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self.chat_history = [{"role": "system", "content": CHAT_PROMPT}]
 
     def ask_chat(self, user_input: str) -> str:
         if not self.client:
             return "🤖 Я пока не могу ответить на общие вопросы, задайте команду сканирования."
 
         try:
-            self.messages.append({"role": "user", "content": user_input})
+            self.chat_history.append({"role": "user", "content": user_input})
             response = self.client.chat.completions.create(
                 model="deepseek/deepseek-v4-flash",
-                messages=self.messages,
+                messages=self.chat_history,
                 max_tokens=250,
                 temperature=0.7
             )
             text = response.choices[0].message.content.strip()
-            self.messages.append({"role": "assistant", "content": text})
+            self.chat_history.append({"role": "assistant", "content": text})
             return text
         except Exception as e:
             return f"❌ Ошибка чата: {str(e)[:100]}"
@@ -1067,9 +1077,25 @@ class JimAgent:
         
         UI.thinking("Анализирую ваш запрос...", 0.3)
         user_lower = user_input.lower()
-        
+
+        # Обработка приветов и обычных вопросов отдельно от сканирования.
+        greeting_words = ['hello', 'hi', 'привет', 'здравствуйте', 'здравствуй', 'добрый', 'hey', 'yo']
+        scan_triggers = ['sql', 'инъекц', 'sqlmap', 'порты', 'nmap', 'gobuster', 'nikto', 'проверь', 'скан', 'проскан', 'запусти', 'анализ', 'пентест', 'аудит', 'директ', 'сайт', 'админ']
+        if any(word in user_lower for word in greeting_words) and not any(word in user_lower for word in scan_triggers):
+            return self.ask_chat(user_input)
+
+        if self.session and any(q in user_lower for q in ['что', 'какая', 'какие', 'где', 'покажи', 'расскажи', 'итог', 'результат']) and any(t in user_lower for t in ['уязвим', 'уязвимость', 'результат', 'найден', 'обнаруж']):
+            self.session.print_report()
+            return ""
+
         intent = self.analyze_intent(user_input)
-        
+
+        if intent.get("intent") == "status_query":
+            if self.session:
+                self.session.print_report()
+                return ""
+            return self.ask_chat(user_input)
+
         # Сохраняем цель
         if intent.get("target") and intent["target"] not in self.context_targets:
             self.context_targets.append(intent["target"])
