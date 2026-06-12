@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Jim - AI-Powered Pentesting Assistant for Kali Linux
-Умный агент: анализирует цель и выбирает нужные утилиты
+Jim - Умный ИИ-агент для пентеста
+Сам анализирует цель и решает, какие утилиты запускать
+Промпт загружается из system_prompt.txt
 """
 
 import sys
@@ -12,15 +13,14 @@ import re
 import shutil
 from datetime import datetime
 
+# ============================================================
+# ОБРАБОТКА АРГУМЕНТОВ
+# ============================================================
+
 VERSION = "2.0.0"
 
-# ============================================================
-# ОБРАБОТКА АРГУМЕНТОВ КОМАНДНОЙ СТРОКИ
-# ============================================================
-
 def update_jim():
-    """Обновляет Jim из GitHub репозитория"""
-    print("🔄 Обновление Jim AI Agent...")
+    print("🔄 Обновление Jim...")
     jim_dir = os.path.expanduser("~/.jim")
     repo_url = "https://github.com/Lolicks/hackagent.git"
     temp_dir = "/tmp/jim-update"
@@ -28,46 +28,32 @@ def update_jim():
     try:
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
-        
-        print("📦 Скачивание обновлений...")
-        subprocess.run(["git", "clone", "--depth", "1", repo_url, temp_dir], capture_output=True, check=True)
-        
-        print("📄 Обновление файлов...")
+        subprocess.run(["git", "clone", "--depth", "1", repo_url, temp_dir], check=True, capture_output=True)
         shutil.copy2(f"{temp_dir}/jim.py", f"{jim_dir}/jim.py")
-        if os.path.exists(f"{temp_dir}/system_prompt.txt"):
-            shutil.copy2(f"{temp_dir}/system_prompt.txt", f"{jim_dir}/")
-        
+        shutil.copy2(f"{temp_dir}/system_prompt.txt", f"{jim_dir}/")
         shutil.rmtree(temp_dir)
-        
-        print("✅ Jim успешно обновлён!")
+        print("✅ Обновление завершено!")
         return True
     except Exception as e:
-        print(f"❌ Ошибка обновления: {e}")
+        print(f"❌ Ошибка: {e}")
         return False
 
 if len(sys.argv) > 1:
     if sys.argv[1] in ["-v", "--version"]:
-        print(f"Jim AI Agent v{VERSION}")
+        print(f"Jim v{VERSION}")
         sys.exit(0)
     elif sys.argv[1] in ["-h", "--help"]:
         print("""
-Jim AI Agent - Умный помощник для пентеста
+Jim - Умный помощник для пентеста
 
 Использование:
-    jim                    Запустить агента
-    jim -h, --help         Справка
-    jim -v, --version      Версия
-    jim -u, --update       Обновить
-
-Примеры:
-    jim
-    > Протестируй сайт example.com
-    > Проверь SQL на testphp.vulnweb.com/artists.php?artist=1
+    jim              - Запустить агента
+    jim -h           - Справка
+    jim -u           - Обновить
 """)
         sys.exit(0)
-    elif sys.argv[1] in ["-u", "--update", "-update"]:
-        success = update_jim()
-        sys.exit(0 if success else 1)
+    elif sys.argv[1] in ["-u", "--update"]:
+        sys.exit(0 if update_jim() else 1)
 
 # ============================================================
 # ЦВЕТА
@@ -87,13 +73,8 @@ class Colors:
     ICON_AGENT = "🐍"
     ICON_USER = "👤"
     ICON_TOOL = "🔧"
-    ICON_SUCCESS = "✅"
-    ICON_ERROR = "❌"
-    ICON_WARNING = "⚠️"
-    ICON_INFO = "ℹ️"
     ICON_ANALYSIS = "🔍"
-    ICON_FOUND = "🎯"
-    ICON_NOT_FOUND = "❌"
+    ICON_DECISION = "🎯"
     ICON_REPORT = "📊"
 
 # ============================================================
@@ -101,7 +82,6 @@ class Colors:
 # ============================================================
 
 def load_api_key():
-    """Загружает API ключ из ~/.jim/.env"""
     env_path = os.path.expanduser("~/.jim/.env")
     if os.path.exists(env_path):
         with open(env_path, 'r') as f:
@@ -111,227 +91,276 @@ def load_api_key():
     return None
 
 def load_system_prompt():
-    """Загружает системный промпт"""
     prompt_path = os.path.expanduser("~/.jim/system_prompt.txt")
     if os.path.exists(prompt_path):
         with open(prompt_path, 'r', encoding='utf-8') as f:
             return f.read()
-    return """Ты - Jim, умный ИИ-агент для пентеста. 
-Анализируй цель, выбирай нужные утилиты, не запускай лишнее.
-После каждой утилиты объясняй, что нашёл или не нашёл."""
+    return "Ты - Jim, умный помощник для пентеста."
 
 API_KEY = load_api_key()
 SYSTEM_PROMPT = load_system_prompt()
 
 # ============================================================
-# АНАЛИЗ ЦЕЛИ
+# ЗАПУСК УТИЛИТ
 # ============================================================
 
-def analyze_target(user_input: str) -> dict:
-    """Анализирует запрос пользователя и определяет, что нужно делать"""
-    analysis = {
-        "target": "",
-        "has_url": False,
-        "has_ip": False,
-        "has_sql_error": False,
-        "has_parameters": False,
-        "suggested_tools": [],
-        "explanation": ""
-    }
-    
-    # Извлекаем цель (IP или URL)
-    ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
-    url_pattern = r'https?://[^\s]+|[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}[^\s]*'
-    
-    ip_matches = re.findall(ip_pattern, user_input)
-    url_matches = re.findall(url_pattern, user_input)
-    
-    if ip_matches:
-        analysis["has_ip"] = True
-        analysis["target"] = ip_matches[0]
-        analysis["explanation"] = f"Обнаружен IP-адрес: {ip_matches[0]}"
-    elif url_matches:
-        analysis["has_url"] = True
-        analysis["target"] = url_matches[0]
-        analysis["explanation"] = f"Обнаружен URL: {url_matches[0]}"
-    
-    # Проверяем наличие параметров в URL
-    if "?" in analysis["target"] and "=" in analysis["target"]:
-        analysis["has_parameters"] = True
-        analysis["suggested_tools"].append("sqlmap")
-        analysis["explanation"] += " | Обнаружены параметры → нужно проверить SQL-инъекции"
-    
-    # Проверяем ключевые слова
-    if "sql" in user_input.lower() or "инъекц" in user_input.lower():
-        analysis["has_sql_error"] = True
-        if "sqlmap" not in analysis["suggested_tools"]:
-            analysis["suggested_tools"].append("sqlmap")
-        analysis["explanation"] += " | Упоминание SQL → проверка инъекций"
-    
-    # Базовые инструменты для любого веб-тестирования
-    if analysis["has_url"] or analysis["has_ip"]:
-        analysis["suggested_tools"].append("whatweb")
-        analysis["suggested_tools"].append("nmap")
-        analysis["explanation"] += " | Базовое сканирование портов и технологий"
-    
-    # Убираем дубликаты
-    analysis["suggested_tools"] = list(dict.fromkeys(analysis["suggested_tools"]))
-    
-    return analysis
-
-# ============================================================
-# ЗАПУСК УТИЛИТ С АНАЛИЗОМ
-# ============================================================
-
-def run_tool(tool: str, target: str) -> dict:
-    """Запускает утилиту и возвращает результат с анализом"""
-    
-    print(f"\n{Colors.ICON_TOOL} {Colors.CYAN}Запуск:{Colors.END} {Colors.BOLD}{tool}{Colors.END}")
+def run_command(cmd: str, timeout: int = 300):
+    """Запускает команду и возвращает вывод"""
     print(f"{Colors.DIM}{'─' * 70}{Colors.END}")
     
-    commands = {
-        "whatweb": f"whatweb {target}",
-        "nmap": f"nmap -sV --open {target}",
-        "sqlmap": f"sqlmap -u '{target}' --batch --dbs --level=1"
-    }
-    
-    if tool not in commands:
-        return {"success": False, "error": f"Неизвестный инструмент: {tool}"}
-    
     try:
-        result = subprocess.run(
-            commands[tool],
+        process = subprocess.Popen(
+            cmd,
             shell=True,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=300
+            bufsize=1
         )
         
-        output = result.stdout + result.stderr
+        output_lines = []
+        for line in iter(process.stdout.readline, ''):
+            if line:
+                output_lines.append(line.rstrip())
+                # Подсветка важного
+                if 'vulnerable' in line.lower() or 'injectable' in line.lower():
+                    print(f"{Colors.GREEN}{line.rstrip()}{Colors.END}")
+                elif 'open' in line.lower() and 'tcp' in line.lower():
+                    print(f"{Colors.GREEN}{line.rstrip()}{Colors.END}")
+                elif 'error' in line.lower():
+                    print(f"{Colors.RED}{line.rstrip()}{Colors.END}")
+                elif 'database' in line.lower() or 'found' in line.lower():
+                    print(f"{Colors.CYAN}{line.rstrip()}{Colors.END}")
+                else:
+                    print(line.rstrip())
         
-        # Анализ результата
-        analysis = analyze_tool_output(tool, output)
-        
-        return {
-            "success": result.returncode == 0,
-            "output": output[:2000],
-            "analysis": analysis
-        }
+        process.wait(timeout=timeout)
+        return {"success": process.returncode == 0, "output": "\n".join(output_lines)}
     except subprocess.TimeoutExpired:
-        return {"success": False, "output": "", "analysis": {"found": False, "message": "Время ожидания истекло"}}
+        process.terminate()
+        return {"success": False, "output": "", "error": "Timeout"}
     except Exception as e:
-        return {"success": False, "output": "", "analysis": {"found": False, "message": str(e)}}
+        return {"success": False, "output": "", "error": str(e)}
 
-def analyze_tool_output(tool: str, output: str) -> dict:
-    """Анализирует вывод утилиты и даёт понятное пояснение"""
+def run_nmap(target: str, flags: str = "-sV --open"):
+    return run_command(f"nmap {flags} {target}", timeout=300)
+
+def run_sqlmap(url: str, flags: str = "--batch --dbs --level=1"):
+    return run_command(f"sqlmap -u '{url}' {flags}", timeout=600)
+
+def run_gobuster(url: str, wordlist: str = "/usr/share/wordlists/dirb/common.txt"):
+    return run_command(f"gobuster dir -u {url} -w {wordlist}", timeout=300)
+
+def run_nikto(target: str):
+    return run_command(f"nikto -h {target}", timeout=600)
+
+def run_whatweb(target: str):
+    return run_command(f"whatweb {target}", timeout=120)
+
+# ============================================================
+# АНАЛИЗ ВЫВОДА
+# ============================================================
+
+def analyze_output(tool: str, output: str):
+    """Анализирует вывод утилиты и возвращает структурированный результат"""
     
-    output_lower = output.lower()
-    analysis = {"found": False, "message": "", "details": ""}
+    analysis = {"found": False, "summary": "", "details": []}
     
-    if tool == "whatweb":
-        # Ищем технологии
-        techs = re.findall(r'\[(.*?)\]', output)
-        if techs:
+    if tool == "nmap":
+        open_ports = re.findall(r'(\d+)/tcp\s+open\s+(\w+)', output)
+        if open_ports:
             analysis["found"] = True
-            analysis["message"] = f"🎯 НАЙДЕНО: Определены технологии"
-            analysis["details"] = f"   • {', '.join(techs[:5])}"
-        else:
-            analysis["found"] = False
-            analysis["message"] = f"❌ НЕ НАЙДЕНО: Не удалось определить технологии"
-            analysis["details"] = "   • Возможно сайт защищён или использует нестандартные технологии"
-    
-    elif tool == "nmap":
-        # Ищем открытые порты
-        ports = re.findall(r'(\d+)/tcp\s+open', output)
-        services = re.findall(r'(\d+)/tcp\s+open\s+(\w+)', output)
-        
-        if ports:
-            analysis["found"] = True
-            analysis["message"] = f"🎯 НАЙДЕНО: Открытые порты ({len(ports)} шт)"
-            details = []
-            for port, service in services[:10]:
-                details.append(f"   • Порт {port}: {service}")
-            analysis["details"] = "\n".join(details) if details else "   • Подробности в выводе выше"
-        else:
-            analysis["found"] = False
-            analysis["message"] = f"❌ НЕ НАЙДЕНО: Открытых портов"
-            analysis["details"] = "   • Возможно хост недоступен или firewall блокирует"
+            analysis["summary"] = f"Найдено {len(open_ports)} открытых портов"
+            for port, service in open_ports[:10]:
+                analysis["details"].append(f"Порт {port}: {service}")
     
     elif tool == "sqlmap":
-        # Проверяем наличие SQL-инъекции
-        if "vulnerable" in output_lower or "injectable" in output_lower:
+        if "vulnerable" in output.lower() or "injectable" in output.lower():
             analysis["found"] = True
-            analysis["message"] = f"🎯 НАЙДЕНО: SQL-инъекция!"
-            
-            # Определяем тип
-            if "boolean" in output_lower:
-                analysis["details"] = "   • Тип: Boolean-based Blind SQLi"
-            elif "union" in output_lower:
-                analysis["details"] = "   • Тип: Union-based SQLi"
-            elif "time" in output_lower:
-                analysis["details"] = "   • Тип: Time-based Blind SQLi"
-            else:
-                analysis["details"] = "   • Параметр уязвим для SQL-инъекций"
-            
+            analysis["summary"] = "Обнаружена SQL-инъекция!"
+            if "boolean" in output.lower():
+                analysis["details"].append("Тип: Boolean-based Blind")
+            if "union" in output.lower():
+                analysis["details"].append("Тип: Union-based")
+            if "time" in output.lower():
+                analysis["details"].append("Тип: Time-based")
             # Ищем базы данных
             dbs = re.findall(r'\[\*\*\]\s+(\w+)', output)
             if dbs:
-                analysis["details"] += f"\n   • Найдены БД: {', '.join(dbs[:3])}"
+                analysis["details"].append(f"Базы данных: {', '.join(dbs[:5])}")
         else:
-            analysis["found"] = False
-            analysis["message"] = f"❌ НЕ НАЙДЕНО: SQL-инъекция"
-            analysis["details"] = "   • Параметры безопасны или защищены WAF"
+            analysis["summary"] = "SQL-инъекция не обнаружена"
+    
+    elif tool == "gobuster":
+        dirs = re.findall(r'/(\S+)\s+\(Status:\s+(\d+)\)', output)
+        interesting = [d for d in dirs if d[1] in ["200", "301", "302"]]
+        if interesting:
+            analysis["found"] = True
+            analysis["summary"] = f"Найдено {len(interesting)} интересных директорий"
+            for path, status in interesting[:10]:
+                analysis["details"].append(f"/{path} (Status: {status})")
+    
+    elif tool == "nikto":
+        vulns = re.findall(r'\+ (.*?):', output)
+        real_vulns = [v for v in vulns if any(x in v.lower() for x in ['vulnerable', 'cve', 'xss', 'sql'])]
+        if real_vulns:
+            analysis["found"] = True
+            analysis["summary"] = f"Найдено {len(real_vulns)} потенциальных уязвимостей"
+            for v in real_vulns[:5]:
+                analysis["details"].append(v[:80])
+    
+    elif tool == "whatweb":
+        techs = re.findall(r'\[(.*?)\]', output)
+        if techs:
+            analysis["found"] = True
+            analysis["summary"] = "Определены технологии"
+            for t in techs[:10]:
+                if 'http' not in t.lower() and len(t) < 50:
+                    analysis["details"].append(t)
     
     return analysis
 
 # ============================================================
-# ФОРМИРОВАНИЕ ОТЧЕТА
+# ИНСТРУМЕНТЫ ДЛЯ API
 # ============================================================
 
-def print_phase_header(phase: str, target: str):
-    """Печатает заголовок этапа"""
-    print(f"\n{Colors.BOLD}{Colors.CYAN}{'═' * 70}{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.CYAN}📋 {phase}{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.CYAN}{'═' * 70}{Colors.END}")
+TOOLS = [
+    {"type": "function", "function": {
+        "name": "run_nmap",
+        "description": "Сканирование портов. Используй первым при тестировании IP/домена",
+        "parameters": {"type": "object", "properties": {"target": {"type": "string"}, "flags": {"type": "string", "default": "-sV --open"}}, "required": ["target"]}
+    }},
+    {"type": "function", "function": {
+        "name": "run_sqlmap",
+        "description": "Поиск SQL-инъекций. Используй ТОЛЬКО если в URL есть параметры (?id=1)",
+        "parameters": {"type": "object", "properties": {"url": {"type": "string"}, "flags": {"type": "string", "default": "--batch --dbs --level=1"}}, "required": ["url"]}
+    }},
+    {"type": "function", "function": {
+        "name": "run_gobuster",
+        "description": "Поиск директорий. Используй если нужно найти скрытые пути",
+        "parameters": {"type": "object", "properties": {"url": {"type": "string"}, "wordlist": {"type": "string", "default": "/usr/share/wordlists/dirb/common.txt"}}, "required": ["url"]}
+    }},
+    {"type": "function", "function": {
+        "name": "run_nikto",
+        "description": "Поиск веб-уязвимостей. Используй для общего сканирования сайта",
+        "parameters": {"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]}
+    }},
+    {"type": "function", "function": {
+        "name": "run_whatweb",
+        "description": "Определение технологий. Используй чтобы узнать CMS, сервер, фреймворки",
+        "parameters": {"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]}
+    }},
+    {"type": "function", "function": {
+        "name": "analyze_output",
+        "description": "Анализирует вывод утилиты и извлекает важную информацию",
+        "parameters": {"type": "object", "properties": {"tool": {"type": "string"}, "output": {"type": "string"}}, "required": ["tool", "output"]}
+    }}
+]
 
-def print_analysis_result(analysis: dict, tool: str):
-    """Печатает результат анализа"""
-    if analysis.get("found"):
-        print(f"\n{Colors.GREEN}{analysis['message']}{Colors.END}")
-    else:
-        print(f"\n{Colors.YELLOW}{analysis['message']}{Colors.END}")
+def execute_tool(tool_name: str, params: dict) -> str:
+    """Выполняет инструмент и возвращает результат"""
     
-    if analysis.get("details"):
-        print(analysis["details"])
-
-def print_final_report(scan_results: list, target: str):
-    """Печатает итоговый отчёт"""
-    print(f"\n{Colors.BOLD}{Colors.GREEN}{'═' * 70}{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.GREEN}{Colors.ICON_REPORT} ИТОГОВЫЙ ОТЧЁТ{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.GREEN}{'═' * 70}{Colors.END}")
+    if tool_name == "run_nmap":
+        result = run_nmap(params["target"], params.get("flags", "-sV --open"))
+        analysis = analyze_output("nmap", result["output"])
+        return json.dumps({"success": result["success"], "output": result["output"][:3000], "analysis": analysis}, ensure_ascii=False)
     
-    print(f"\n{Colors.CYAN}🎯 Цель:{Colors.END} {target}")
-    print(f"{Colors.CYAN}📅 Время:{Colors.END} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    elif tool_name == "run_sqlmap":
+        result = run_sqlmap(params["url"], params.get("flags", "--batch --dbs --level=1"))
+        analysis = analyze_output("sqlmap", result["output"])
+        return json.dumps({"success": result["success"], "output": result["output"][:3000], "analysis": analysis}, ensure_ascii=False)
     
-    print(f"\n{Colors.BOLD}📊 Результаты сканирования:{Colors.END}")
+    elif tool_name == "run_gobuster":
+        result = run_gobuster(params["url"], params.get("wordlist", "/usr/share/wordlists/dirb/common.txt"))
+        analysis = analyze_output("gobuster", result["output"])
+        return json.dumps({"success": result["success"], "output": result["output"][:3000], "analysis": analysis}, ensure_ascii=False)
     
-    found_anything = False
-    for result in scan_results:
-        if result.get("analysis", {}).get("found"):
-            found_anything = True
-            print(f"\n   {Colors.GREEN}✅ {result['tool'].upper()}:{Colors.END}")
-            print(f"      {result['analysis'].get('message', '')}")
-            if result['analysis'].get('details'):
-                print(f"      {result['analysis']['details']}")
+    elif tool_name == "run_nikto":
+        result = run_nikto(params["target"])
+        analysis = analyze_output("nikto", result["output"])
+        return json.dumps({"success": result["success"], "output": result["output"][:3000], "analysis": analysis}, ensure_ascii=False)
     
-    if not found_anything:
-        print(f"\n   {Colors.YELLOW}⚠️ Уязвимостей не обнаружено{Colors.END}")
-        print(f"   {Colors.DIM}Рекомендация: проверьте доступность цели и права доступа{Colors.END}")
+    elif tool_name == "run_whatweb":
+        result = run_whatweb(params["target"])
+        analysis = analyze_output("whatweb", result["output"])
+        return json.dumps({"success": result["success"], "output": result["output"][:3000], "analysis": analysis}, ensure_ascii=False)
     
-    print(f"\n{Colors.BOLD}{Colors.GREEN}{'═' * 70}{Colors.END}")
+    elif tool_name == "analyze_output":
+        analysis = analyze_output(params["tool"], params["output"])
+        return json.dumps(analysis, ensure_ascii=False)
+    
+    return json.dumps({"error": f"Неизвестный инструмент: {tool_name}"})
 
 # ============================================================
-# ОСНОВНОЙ ЦИКЛ АГЕНТА
+# КЛАСС АГЕНТА
+# ============================================================
+
+class JimAgent:
+    def __init__(self):
+        if not API_KEY:
+            print(f"{Colors.ICON_AGENT} {Colors.RED}API ключ не найден!{Colors.END}")
+            sys.exit(1)
+        
+        import openai
+        self.client = openai.OpenAI(
+            api_key=API_KEY,
+            base_url="https://openrouter.ai/api/v1",
+        )
+        self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    
+    def process(self, user_input: str) -> str:
+        self.messages.append({"role": "user", "content": user_input})
+        
+        try:
+            response = self.client.chat.completions.create(
+                model="deepseek/deepseek-v4-flash",
+                messages=self.messages,
+                tools=TOOLS,
+                tool_choice="auto",
+                stream=False,
+                temperature=0.3
+            )
+            
+            assistant = response.choices[0].message
+            self.messages.append(assistant)
+            
+            iteration = 0
+            while assistant.tool_calls and iteration < 10:
+                for tool_call in assistant.tool_calls:
+                    tool_name = tool_call.function.name
+                    params = json.loads(tool_call.function.arguments)
+                    
+                    print(f"\n{Colors.ICON_TOOL} {Colors.PURPLE}Jim запускает:{Colors.END} {Colors.BOLD}{tool_name}{Colors.END}")
+                    result = execute_tool(tool_name, params)
+                    
+                    self.messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": result
+                    })
+                
+                response = self.client.chat.completions.create(
+                    model="deepseek/deepseek-v4-flash",
+                    messages=self.messages,
+                    tools=TOOLS,
+                    tool_choice="auto",
+                    stream=False,
+                    temperature=0.3
+                )
+                
+                assistant = response.choices[0].message
+                self.messages.append(assistant)
+                iteration += 1
+            
+            return assistant.content or "Готово!"
+        except Exception as e:
+            return f"Ошибка: {e}"
+    
+    def clear(self):
+        self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+# ============================================================
+# ЗАПУСК
 # ============================================================
 
 def print_banner():
@@ -339,22 +368,19 @@ def print_banner():
     print(f"{Colors.BOLD}{Colors.CYAN}")
     print("╔═══════════════════════════════════════════════════════════════════════════╗")
     print("║                                                                           ║")
-    print("║              🐍 JIM AI - УМНЫЙ ПЕНТЕСТ АССИСТЕНТ 🐍                        ║")
-    print("║                   Анализирую цель → Выбираю утилиты → Отчёт               ║")
+    print("║                         🐍 JIM - УМНЫЙ АГЕНТ 🐍                            ║")
+    print("║                   Анализирую → Решаю → Выполняю → Отчитываюсь             ║")
     print("║                                                                           ║")
     print("╚═══════════════════════════════════════════════════════════════════════════╝")
     print(f"{Colors.END}")
 
 def main():
-    if not API_KEY:
-        print(f"{Colors.ICON_ERROR} {Colors.RED}API ключ не найден!{Colors.END}")
-        print("Запустите установку заново: ./install.sh")
-        return
-    
     print_banner()
     print(f"{Colors.ICON_AGENT} {Colors.GREEN}Jim готов!{Colors.END}")
-    print(f"{Colors.ICON_INFO} Просто опишите цель, а я сам решу, что проверять")
+    print(f"{Colors.ICON_INFO} Промпт загружен из: ~/.jim/system_prompt.txt")
     print(f"{Colors.DIM}{'─' * 70}{Colors.END}")
+    
+    agent = JimAgent()
     
     while True:
         try:
@@ -365,6 +391,7 @@ def main():
                 break
             
             if user_input.lower() == '/clear':
+                agent.clear()
                 os.system('clear')
                 print_banner()
                 continue
@@ -372,43 +399,21 @@ def main():
             if not user_input:
                 continue
             
-            # 1. Анализ цели
-            print(f"\n{Colors.ICON_ANALYSIS} {Colors.BLUE}Анализирую цель...{Colors.END}")
-            analysis = analyze_target(user_input)
+            print(f"\n{Colors.ICON_AGENT} {Colors.BLUE}Анализирую цель и принимаю решение...{Colors.END}")
+            response = agent.process(user_input)
             
-            print(f"\n{Colors.CYAN}🎯 Цель: {analysis['target']}{Colors.END}")
-            print(f"{Colors.CYAN}📋 План: {analysis['explanation']}{Colors.END}")
-            
-            if not analysis["suggested_tools"]:
-                print(f"{Colors.ICON_WARNING} {Colors.YELLOW}Не удалось определить цель. Укажите IP или URL.{Colors.END}")
-                continue
-            
-            # 2. Запуск утилит
-            scan_results = []
-            
-            for tool in analysis["suggested_tools"]:
-                print_phase_header(f"Этап {len(scan_results)+1}: {tool.upper()}", analysis["target"])
-                
-                result = run_tool(tool, analysis["target"])
-                result["tool"] = tool
-                scan_results.append(result)
-                
-                # Выводим анализ
-                print_analysis_result(result.get("analysis", {}), tool)
-                
-                # Если нашли SQL - не продолжаем (уже есть результат)
-                if tool == "sqlmap" and result.get("analysis", {}).get("found"):
-                    print(f"\n{Colors.GREEN}✅ SQL-инъекция подтверждена! Дальнейшее тестирование не требуется.{Colors.END}")
-                    break
-            
-            # 3. Итоговый отчёт
-            print_final_report(scan_results, analysis["target"])
+            if response:
+                print(f"\n{Colors.BOLD}{Colors.GREEN}┌─────────────────────────────────────────────────────────────────────────┐{Colors.END}")
+                print(f"{Colors.BOLD}{Colors.GREEN}│ {Colors.ICON_AGENT} ОТВЕТ:{Colors.END}")
+                print(f"{Colors.BOLD}{Colors.GREEN}├─────────────────────────────────────────────────────────────────────────┤{Colors.END}")
+                for line in response.split('\n'):
+                    if line.strip():
+                        print(f"{Colors.DIM}│{Colors.END} {line}")
+                print(f"{Colors.BOLD}{Colors.GREEN}└─────────────────────────────────────────────────────────────────────────┘{Colors.END}")
             
         except KeyboardInterrupt:
             print(f"\n\n{Colors.ICON_WARNING} {Colors.YELLOW}Прервано{Colors.END}")
             continue
-        except Exception as e:
-            print(f"\n{Colors.ICON_ERROR} {Colors.RED}Ошибка: {e}{Colors.END}")
 
 if __name__ == "__main__":
     main()
