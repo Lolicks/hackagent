@@ -45,15 +45,29 @@ from enum import Enum
 
 current_process = None
 interrupted = False
+session_start_time = None
+paused = False
 
 def signal_handler(sig, frame):
-    global interrupted, current_process
+    global interrupted, current_process, session_start_time
     interrupted = True
+    elapsed = ""
+    if session_start_time:
+        elapsed = f" (работал {int(time.time() - session_start_time)}с)"
+    
+    print(f"\n\n{Colors.BOLD}{Colors.YELLOW}⏸️  ОСТАНОВКА...{elapsed}{Colors.END}")
+    
     if current_process:
         try:
+            print(f"{Colors.DIM}Завершаю процесс...{Colors.END}")
             current_process.terminate()
-        except:
+            time.sleep(0.5)
+            if current_process.poll() is None:
+                current_process.kill()
+        except Exception as e:
             pass
+    
+    print(f"{Colors.YELLOW}Введите /exit для выхода или команду для продолжения{Colors.END}\n")
 
 signal.signal(signal.SIGINT, signal_handler)
 
@@ -409,7 +423,7 @@ def get_sqlmap_flags(context: str) -> str:
 # ============================================================
 
 def run_command(cmd: str, timeout: int = 300) -> Dict:
-    global current_process, interrupted
+    global current_process, interrupted, session_start_time
     
     print(f"{Colors.DIM}└─$ {cmd}{Colors.END}")
     UI.separator("─")
@@ -417,6 +431,8 @@ def run_command(cmd: str, timeout: int = 300) -> Dict:
     interrupted = False
     output_lines = []
     start_time = time.time()
+    if not session_start_time:
+        session_start_time = start_time
     
     try:
         current_process = subprocess.Popen(
@@ -430,9 +446,21 @@ def run_command(cmd: str, timeout: int = 300) -> Dict:
         
         for line in iter(current_process.stdout.readline, ''):
             if interrupted:
-                current_process.terminate()
-                print(f"\n{Colors.ICON_WARNING} Прервано{Colors.END}")
-                return {"success": False, "output": "\n".join(output_lines), "interrupted": True}
+                print(f"\n\n{Colors.BOLD}{Colors.YELLOW}⏹️  ОСТАНОВКА{Colors.END}")
+                print(f"{Colors.DIM}Завершаю процесс...{Colors.END}")
+                try:
+                    current_process.terminate()
+                    current_process.wait(timeout=2)
+                except:
+                    try:
+                        current_process.kill()
+                    except:
+                        pass
+                
+                elapsed = int(time.time() - start_time)
+                print(f"{Colors.CYAN}Собрано {len(output_lines)} строк за {elapsed}с{Colors.END}")
+                print(f"{Colors.ICON_SUCCESS} Результаты сохранены{Colors.END}\n")
+                return {"success": False, "output": "\n".join(output_lines), "interrupted": True, "duration": elapsed}
             
             if line:
                 output_lines.append(line.rstrip())
@@ -448,10 +476,11 @@ def run_command(cmd: str, timeout: int = 300) -> Dict:
                     print(f"{Colors.DIM}{line.rstrip()}{Colors.END}")
         
         current_process.wait(timeout=timeout)
+        elapsed = time.time() - start_time
         return {
             "success": current_process.returncode == 0,
             "output": "\n".join(output_lines),
-            "duration": time.time() - start_time,
+            "duration": elapsed,
             "interrupted": False
         }
     except subprocess.TimeoutExpired:
@@ -742,6 +771,31 @@ class Session:
             "timestamp": datetime.now().isoformat()
         })
     
+    def save_log(self) -> str:
+        """Сохранить сессию в файл"""
+        try:
+            log_dir = os.path.expanduser("~/.jim/sessions")
+            os.makedirs(log_dir, exist_ok=True)
+            
+            log_file = os.path.join(log_dir, f"{self.id}.json")
+            session_data = {
+                "id": self.id,
+                "target": self.target,
+                "start_time": self.start_time.isoformat(),
+                "end_time": datetime.now().isoformat(),
+                "duration": str(datetime.now() - self.start_time),
+                "results_count": len(self.results),
+                "results": self.results
+            }
+            
+            with open(log_file, 'w', encoding='utf-8') as f:
+                json.dump(session_data, f, ensure_ascii=False, indent=2)
+            
+            return log_file
+        except Exception as e:
+            print(f"{Colors.RED}Ошибка сохранения лога: {e}{Colors.END}")
+            return None
+    
     def print_status(self):
         print(f"\n{Colors.BOLD}{Colors.CYAN}┌─────────────────────────────────────────────────────────────────────────┐{Colors.END}")
         print(f"{Colors.BOLD}{Colors.CYAN}│ {Colors.ICON_TARGET} СЕССИЯ{Colors.END}")
@@ -769,7 +823,11 @@ class Session:
         else:
             print(f"\n{Colors.YELLOW}⚠️ УЯЗВИМОСТЕЙ НЕ ОБНАРУЖЕНО{Colors.END}")
         
-        print(f"\n{Colors.DIM}📁 Сессия: ~/.jim/sessions/{self.id}{Colors.END}")
+        log_file = self.save_log()
+        if log_file:
+            print(f"\n{Colors.GREEN}{Colors.ICON_SUCCESS} Сессия сохранена:{Colors.END}")
+            print(f"{Colors.DIM}   {log_file}{Colors.END}")
+        
         UI.separator("═")
 
 # ============================================================
@@ -814,28 +872,6 @@ class JimAgent:
         if not self.client:
             return IntentAnalyzer.analyze(user_input, self.context_targets)
 
-        system_text = (
-            "Ты — интеллектуальный пентест-ассистент на DeepSeek. "
-            "Анализируешь естественный язык, ошибки, URL и решаешь какие инструменты запускать. "
-            "\n"
-            "ИНСТРУМЕНТЫ И СЦЕНАРИИ:\n"
-            "1. SQL ошибка (Error 1064, syntax error, injection) + параметры в URL → sqlmap\n"
-            "2. IP адрес → nmap\n"
-            "3. Домен/URL без параметров → whatweb (определение технологий)\n"
-            "4. Параметры в URL → sqlmap (по умолчанию)\n"
-            "5. Ошибка 403/401 + админка (/admin, /login) → nikto\n"
-            "6. Полный аудит сайта → whatweb + nikto\n"
-            "\n"
-            "ФЛАГИ:\n"
-            "sqlmap: --batch --dbs для быстрой проверки, --random-agent для WAF, --level=3 для полной\n"
-            "nmap: -sV --open для стандартного, -p- для всех портов, -sS для скрытого сканирования\n"
-            "whatweb: базовые флаги, определение технологий\n"
-            "nikto: -h target для сайта\n"
-            "\n"
-            "Возвращай ТОЛЬКО JSON без текста: "
-            "{\"intent\": \"...\", \"target\": \"...\", \"has_params\": true/false, \"tools\": [...], \"explanation\": \"...\", \"context_keywords\": \"...\"}"
-        )
-        
         target_context = ""
         if self.context_targets:
             target_context = f"\nСохранённые цели из истории: {', '.join(self.context_targets[-3:])}"
@@ -854,7 +890,7 @@ class JimAgent:
             response = self.client.chat.completions.create(
                 model="deepseek/deepseek-v4-flash",
                 messages=[
-                    {"role": "system", "content": system_text},
+                    {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=300,
@@ -990,6 +1026,14 @@ class JimAgent:
                 return ""
             return "📊 Нет отчёта"
         
+        elif cmd in ["save", "savelog"]:
+            if self.session:
+                log_file = self.session.save_log()
+                if log_file:
+                    return f"{Colors.ICON_SUCCESS} Сессия сохранена: {log_file}"
+                return f"{Colors.ICON_ERROR} Ошибка сохранения"
+            return "📊 Нет активной сессии для сохранения"
+        
         elif cmd in ["context", "targets"]:
             if self.context_targets:
                 result = "📋 СОХРАНЁННЫЕ ЦЕЛИ:\n"
@@ -1027,12 +1071,16 @@ class JimAgent:
 ║                                                                    ║
 ║  ⚙️ КОМАНДЫ:                                                      ║
 ║     • /status - статус сессии                                     ║
-║     • /stop - остановить                                          ║
+║     • /stop - остановить сканирование                             ║
 ║     • /continue - продолжить                                      ║
 ║     • /report - итоговый отчёт                                    ║
+║     • /save - сохранить логи сессии                               ║
 ║     • /context - показать цели                                    ║
 ║     • /reset - очистить память                                    ║
 ║     • /exit - выход                                               ║
+║                                                                    ║
+║  ⌨️ ГОРЯЧИЕ КЛАВИШИ:                                              ║
+║     • Ctrl+C - остановить текущее сканирование                    ║
 ║                                                                    ║
 ╚════════════════════════════════════════════════════════════════════╝"""
         
@@ -1070,6 +1118,8 @@ def print_banner():
     print(f"{Colors.DIM}{'='*70}{Colors.END}")
 
 def main():
+    global session_start_time
+    
     print_banner()
     
     if not check_api_key():
@@ -1081,13 +1131,21 @@ def main():
     print(f"\n{Colors.ICON_AGENT} {Colors.GREEN}JIM ГОТОВ{Colors.END} | {Colors.ICON_SHIELD} Понимаю естественный язык")
     print(f"{Colors.ICON_INFO} Просто опишите, что нужно сделать")
     print(f"{Colors.DIM}{'='*70}{Colors.END}")
+    print(f"{Colors.DIM}Подсказка: /help для справки, Ctrl+C для остановки сканирования{Colors.END}\n")
+    
+    main_start_time = time.time()
     
     while True:
         try:
             user_input = input(f"\n{Colors.BOLD}{Colors.GREEN}[{Colors.ICON_USER}]{Colors.END} ").strip()
             
             if user_input.lower() in ['/exit', 'exit', 'quit']:
+                elapsed = int(time.time() - main_start_time)
+                if agent.context_targets:
+                    print(f"\n{Colors.CYAN}📋 Сеансов проведено: {len(agent.context_targets)}{Colors.END}")
+                print(f"{Colors.CYAN}⏱️  Время работы: {elapsed}с{Colors.END}")
                 print(f"\n{Colors.ICON_AGENT} {Colors.GREEN}До свидания!{Colors.END}\n")
+                session_start_time = None
                 break
             
             if not user_input:
@@ -1098,10 +1156,16 @@ def main():
                 print(f"\n{Colors.ICON_AGENT} {response}")
             
         except KeyboardInterrupt:
-            print(f"\n\n{Colors.ICON_WARNING} {Colors.YELLOW}Прервано. /exit для выхода{Colors.END}")
+            if session_start_time:
+                elapsed = int(time.time() - session_start_time)
+                print(f"\n\n{Colors.BOLD}{Colors.YELLOW}⏸️  Сканирование остановлено ({elapsed}с){Colors.END}")
+            print(f"{Colors.DIM}Введите /exit для выхода или команду для продолжения{Colors.END}")
+            session_start_time = None
             continue
         except Exception as e:
-            print(f"\n{Colors.ICON_ERROR} {Colors.RED}Ошибка: {e}{Colors.END}")
+            print(f"\n{Colors.ICON_ERROR} {Colors.RED}Ошибка: {str(e)[:100]}{Colors.END}")
+            session_start_time = None
+            continue
 
 if __name__ == "__main__":
     main()
