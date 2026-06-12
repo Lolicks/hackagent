@@ -389,7 +389,9 @@ def check_api_key():
 # ============================================================
 
 def get_nmap_flags(context: str) -> str:
-    context_lower = context.lower()
+    """Выбрать флаги для nmap на основе контекста"""
+    context_lower = context.lower() if isinstance(context, str) else str(context).lower()
+    
     if "быстрый" in context_lower or "quick" in context_lower:
         return "-F --open"
     elif "все порты" in context_lower or "full" in context_lower or "all" in context_lower:
@@ -402,7 +404,26 @@ def get_nmap_flags(context: str) -> str:
         return "-sV --open"
 
 def get_sqlmap_flags(context: str) -> str:
-    context_lower = context.lower()
+    """Выбрать флаги для sqlmap на основе контекста и явно указанных флагов"""
+    context_lower = context.lower() if isinstance(context, str) else str(context).lower()
+    
+    # Сначала проверяем явно указанные флаги
+    explicit_flags = []
+    
+    # Извлекаем явные флаги типа --forms, --crawl и т.д.
+    flag_patterns = [r'--\w+']
+    for pattern in flag_patterns:
+        explicit_flags.extend(re.findall(pattern, context_lower))
+    
+    base_flags = "--batch --dbs --level=1"
+    
+    # Если есть явные флаги, используем их вместе с базовыми
+    if explicit_flags:
+        # Удаляем дубликаты и складываем
+        explicit_flags_str = " ".join(set(explicit_flags))
+        return f"{base_flags} {explicit_flags_str}"
+    
+    # Иначе используем логику по контексту
     if "быстрый" in context_lower or "quick" in context_lower:
         return "--batch --current-db --level=1"
     elif "полный" in context_lower or "full" in context_lower or "agressive" in context_lower or "все" in context_lower:
@@ -416,7 +437,7 @@ def get_sqlmap_flags(context: str) -> str:
     elif "error" in context_lower or "ошибк" in context_lower:
         return "--batch --dbs --technique=E --level=1"
     else:
-        return "--batch --dbs --level=1"
+        return base_flags
 
 # ============================================================
 # ЗАПУСК КОМАНД
@@ -649,12 +670,31 @@ class IntentAnalyzer:
 
         for candidate in candidates:
             if isinstance(candidate, dict):
+                # Гарантируем что context_keywords это строка, даже если DeepSeek вернул список
+                context_keywords = candidate.get("context_keywords", "")
+                if isinstance(context_keywords, list):
+                    context_keywords = " ".join(str(k) for k in context_keywords)
+                elif not isinstance(context_keywords, str):
+                    context_keywords = str(context_keywords) if context_keywords else ""
+                
+                # Гарантируем что tools это список
+                tools = candidate.get("tools", [])
+                if isinstance(tools, str):
+                    tools = [tools]
+                elif not isinstance(tools, list):
+                    tools = []
+                
+                # Гарантируем что target это строка
+                target = candidate.get("target")
+                if target and not isinstance(target, str):
+                    target = str(target)
+                
                 return {
                     "intent": candidate.get("intent", "unknown"),
-                    "target": candidate.get("target"),
+                    "target": target,
                     "has_params": bool(candidate.get("has_params")),
-                    "tools": candidate.get("tools", []),
-                    "context_keywords": candidate.get("context_keywords", ""),
+                    "tools": tools,
+                    "context_keywords": context_keywords,
                     "explanation": candidate.get("explanation", "")
                 }
         return {}
@@ -744,6 +784,12 @@ class IntentAnalyzer:
         for kw in ['быстрый', 'quick', 'полный', 'full', 'агрессивный', 'aggressive', 'тихий', 'stealth', 'waf']:
             if kw in user_lower:
                 keywords.append(kw)
+        
+        # Также извлекаем явные флаги типа --forms, --crawl и т.д.
+        explicit_flags = re.findall(r'--\w+', user_input)
+        if explicit_flags:
+            keywords.extend(explicit_flags)
+        
         result["context_keywords"] = " ".join(keywords)
         
         return result
