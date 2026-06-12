@@ -31,6 +31,9 @@ import shutil
 import time
 import threading
 import signal
+import urllib.request
+import urllib.parse
+from urllib.error import HTTPError
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, asdict
@@ -223,19 +226,27 @@ class UI:
 # ============================================================
 
 def load_api_key():
-    env_path = os.path.expanduser("~/.jim/.env")
-    if os.path.exists(env_path):
-        with open(env_path, 'r') as f:
-            for line in f:
-                if line.startswith("OPENROUTER_API_KEY="):
-                    return line.strip().split("=", 1)[1]
+    env_paths = [
+        os.path.expanduser("~/.jim/.env"),
+        os.path.join(os.getcwd(), ".env")
+    ]
+    for env_path in env_paths:
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip().startswith("OPENROUTER_API_KEY="):
+                        return line.strip().split("=", 1)[1]
     return None
 
 def load_system_prompt():
-    prompt_path = os.path.expanduser("~/.jim/system_prompt.txt")
-    if os.path.exists(prompt_path):
-        with open(prompt_path, 'r', encoding='utf-8') as f:
-            return f.read()
+    prompt_paths = [
+        os.path.expanduser("~/.jim/system_prompt.txt"),
+        os.path.join(os.getcwd(), "system_prompt.txt")
+    ]
+    for prompt_path in prompt_paths:
+        if os.path.exists(prompt_path):
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                return f.read()
     return """Ты - Jim, интеллектуальный ИИ-агент для пентеста. Понимаешь естественный язык. Будь полезным и понятным."""
 
 def ensure_directories():
@@ -247,6 +258,40 @@ def ensure_directories():
     ]
     for d in dirs:
         os.makedirs(d, exist_ok=True)
+
+def context_file_path() -> str:
+    return os.path.expanduser("~/.jim/targets.json")
+
+
+def load_context_targets() -> List[str]:
+    path = context_file_path()
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                targets = json.load(f)
+                if isinstance(targets, list):
+                    return targets[-5:]
+        except Exception:
+            pass
+    return []
+
+
+def save_context_targets(targets: List[str]):
+    path = context_file_path()
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(targets[-5:], f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def is_admin_path(target: str) -> bool:
+    path = target.lower()
+    return any(token in path for token in ['/admin', '/login', '/wp-admin', '/administrator', '/user/login'])
+
+
+def is_static_file(target: str) -> bool:
+    return bool(re.search(r'\.(html|htm|css|js|png|jpg|jpeg|gif|svg|ico|pdf|txt)(\?|$)', target.lower()))
 
 API_KEY = load_api_key()
 SYSTEM_PROMPT = load_system_prompt()
@@ -289,10 +334,41 @@ def check_api_key():
             temperature=0.0
         )
         UI.success("API подключение успешно")
-        return True
     except Exception as e:
         UI.error(f"Ошибка подключения: {str(e)[:50]}")
         return False
+
+    UI.thinking("Проверяю баланс...", 0.5)
+    try:
+        request = urllib.request.Request(
+            "https://openrouter.ai/api/v1/credits",
+            headers={
+                "Authorization": f"Bearer {API_KEY}",
+                "Content-Type": "application/json"
+            }
+        )
+        with urllib.request.urlopen(request, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            balance = None
+            if isinstance(data, dict):
+                balance = data.get('balance') or data.get('credits') or data.get('available')
+            if balance is None:
+                UI.warning("Не удалось определить баланс, но ключ действителен")
+            elif isinstance(balance, (int, float)) and balance <= 0:
+                UI.error("Баланс равен нулю или отрицательный. Пополните счёт.")
+                return False
+            else:
+                UI.success(f"Баланс доступен: {balance}")
+    except HTTPError as e:
+        if e.code == 402:
+            UI.error("Баланс недостаточен (402). Пополните счёт.")
+            return False
+        UI.error(f"Ошибка проверки баланса: HTTP {e.code}")
+        return False
+    except Exception as e:
+        UI.warning(f"Проверка баланса не удалась: {str(e)[:50]}")
+
+    return True
 
 # ============================================================
 # УМНЫЙ ВЫБОР ФЛАГОВ
@@ -572,13 +648,16 @@ class IntentAnalyzer:
         elif any(word in user_lower for word in ['просканируй', 'проверь', 'протестируй']):
             result["intent"] = "general_scan"
             result["tools"].append("whatweb")
-            if result["has_params"]:
-                result["tools"].append("sqlmap")
             result["explanation"] = "Общее сканирование"
+            if result["has_params"] and not is_admin_path(result["target"]) and not is_static_file(result["target"]):
+                if any(word in user_lower for word in ['sql', 'инъекц', 'sqlmap']):
+                    result["tools"].append("sqlmap")
         
-        # Если есть параметры - добавляем sqlmap
-        if result["has_params"] and "sqlmap" not in result["tools"]:
-            result["tools"].insert(0, "sqlmap")
+        # Добавляем sqlmap, только если пользователь явно запрашивал SQL и URL подходит
+        if (result["has_params"] and not is_admin_path(result["target"]) and not is_static_file(result["target"])):
+            if any(word in user_lower for word in ['sql', 'инъекц', 'sqlmap', 'проверь sql', 'найди sql']):
+                if "sqlmap" not in result["tools"]:
+                    result["tools"].insert(0, "sqlmap")
         
         # Извлекаем контекстные ключевые слова для флагов
         keywords = []
@@ -650,7 +729,7 @@ class JimAgent:
     def __init__(self):
         self.client = None
         self.session: Optional[Session] = None
-        self.context_targets: List[str] = []
+        self.context_targets: List[str] = load_context_targets()
         self.paused = False
         self.auto_mode = AUTO_MODE
     
@@ -678,6 +757,7 @@ class JimAgent:
         # Сохраняем цель
         if intent["target"] and intent["target"] not in self.context_targets:
             self.context_targets.append(intent["target"])
+            save_context_targets(self.context_targets)
         
         if not intent["target"]:
             return """
@@ -805,6 +885,7 @@ class JimAgent:
         
         elif cmd in ["reset", "clear"]:
             self.context_targets = []
+            save_context_targets(self.context_targets)
             self.session = None
             self.paused = False
             return f"{Colors.ICON_RESET} Память очищена"
