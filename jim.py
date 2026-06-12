@@ -17,7 +17,7 @@ from datetime import datetime
 # ОБРАБОТКА АРГУМЕНТОВ
 # ============================================================
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 def update_jim():
     print("🔄 Обновление Jim...")
