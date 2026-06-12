@@ -17,7 +17,7 @@ from datetime import datetime
 # ОБРАБОТКА АРГУМЕНТОВ
 # ============================================================
 
-VERSION = "2.0.1"
+VERSION = "2.0.0"
 
 def update_jim():
     print("🔄 Обновление Jim...")
@@ -70,12 +70,17 @@ class Colors:
     DIM = '\033[2m'
     END = '\033[0m'
     
+    # Иконки
     ICON_AGENT = "🐍"
     ICON_USER = "👤"
     ICON_TOOL = "🔧"
     ICON_ANALYSIS = "🔍"
     ICON_DECISION = "🎯"
     ICON_REPORT = "📊"
+    ICON_INFO = "ℹ️"
+    ICON_SUCCESS = "✅"
+    ICON_ERROR = "❌"
+    ICON_WARNING = "⚠️"
 
 # ============================================================
 # ЗАГРУЗКА НАСТРОЕК
@@ -91,11 +96,16 @@ def load_api_key():
     return None
 
 def load_system_prompt():
+    # Сначала ищем в локальной папке (для разработки)
+    if os.path.exists("system_prompt.txt"):
+        with open("system_prompt.txt", 'r', encoding='utf-8') as f:
+            return f.read()
+    # Потом в ~/.jim
     prompt_path = os.path.expanduser("~/.jim/system_prompt.txt")
     if os.path.exists(prompt_path):
         with open(prompt_path, 'r', encoding='utf-8') as f:
             return f.read()
-    return "Ты - Jim, умный помощник для пентеста."
+    return """Ты - Jim, умный помощник для пентеста. Будь полезным."""
 
 API_KEY = load_api_key()
 SYSTEM_PROMPT = load_system_prompt()
@@ -173,6 +183,8 @@ def analyze_output(tool: str, output: str):
             analysis["summary"] = f"Найдено {len(open_ports)} открытых портов"
             for port, service in open_ports[:10]:
                 analysis["details"].append(f"Порт {port}: {service}")
+        else:
+            analysis["summary"] = "Открытых портов не найдено"
     
     elif tool == "sqlmap":
         if "vulnerable" in output.lower() or "injectable" in output.lower():
@@ -187,7 +199,7 @@ def analyze_output(tool: str, output: str):
             # Ищем базы данных
             dbs = re.findall(r'\[\*\*\]\s+(\w+)', output)
             if dbs:
-                analysis["details"].append(f"Базы данных: {', '.join(dbs[:5])}")
+                analysis["details"].append(f"Базы данных: {', '.join(dbs[:5])")
         else:
             analysis["summary"] = "SQL-инъекция не обнаружена"
     
@@ -199,6 +211,8 @@ def analyze_output(tool: str, output: str):
             analysis["summary"] = f"Найдено {len(interesting)} интересных директорий"
             for path, status in interesting[:10]:
                 analysis["details"].append(f"/{path} (Status: {status})")
+        else:
+            analysis["summary"] = "Интересных директорий не найдено"
     
     elif tool == "nikto":
         vulns = re.findall(r'\+ (.*?):', output)
@@ -208,6 +222,8 @@ def analyze_output(tool: str, output: str):
             analysis["summary"] = f"Найдено {len(real_vulns)} потенциальных уязвимостей"
             for v in real_vulns[:5]:
                 analysis["details"].append(v[:80])
+        else:
+            analysis["summary"] = "Уязвимостей не обнаружено"
     
     elif tool == "whatweb":
         techs = re.findall(r'\[(.*?)\]', output)
@@ -217,6 +233,8 @@ def analyze_output(tool: str, output: str):
             for t in techs[:10]:
                 if 'http' not in t.lower() and len(t) < 50:
                     analysis["details"].append(t)
+        else:
+            analysis["summary"] = "Технологии не определены"
     
     return analysis
 
@@ -298,7 +316,8 @@ def execute_tool(tool_name: str, params: dict) -> str:
 class JimAgent:
     def __init__(self):
         if not API_KEY:
-            print(f"{Colors.ICON_AGENT} {Colors.RED}API ключ не найден!{Colors.END}")
+            print(f"{Colors.ICON_ERROR} {Colors.RED}API ключ не найден!{Colors.END}")
+            print(f"{Colors.ICON_INFO} Запустите установку: ./install.sh{Colors.END}")
             sys.exit(1)
         
         import openai
@@ -377,7 +396,7 @@ def print_banner():
 def main():
     print_banner()
     print(f"{Colors.ICON_AGENT} {Colors.GREEN}Jim готов!{Colors.END}")
-    print(f"{Colors.ICON_INFO} Промпт загружен из: ~/.jim/system_prompt.txt")
+    print(f"{Colors.ICON_INFO} Промпт загружен{Colors.END}")
     print(f"{Colors.DIM}{'─' * 70}{Colors.END}")
     
     agent = JimAgent()
@@ -399,7 +418,7 @@ def main():
             if not user_input:
                 continue
             
-            print(f"\n{Colors.ICON_AGENT} {Colors.BLUE}Анализирую цель и принимаю решение...{Colors.END}")
+            print(f"\n{Colors.ICON_ANALYSIS} {Colors.BLUE}Анализирую цель и принимаю решение...{Colors.END}")
             response = agent.process(user_input)
             
             if response:
