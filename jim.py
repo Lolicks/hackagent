@@ -649,6 +649,132 @@ def run_nikto(target: str) -> Dict:
     return run_command(f"nikto -h {target}", timeout=900)
 
 # ============================================================
+# АДАПТИВНЫЙ ИИ-УПРАВЛЯЕМЫЙ СКАНЕР
+# ============================================================
+
+class AdaptiveScanner:
+    """Умный сканер который анализирует результаты через DeepSeek и адаптируется"""
+    
+    def __init__(self, client, system_prompt: str):
+        self.client = client
+        self.system_prompt = system_prompt
+        self.attempt = 0
+        self.max_attempts = 3
+    
+    def analyze_result_with_ai(self, tool: str, output: str, target: str) -> Dict:
+        """DeepSeek анализирует вывод инструмента и принимает решение"""
+        
+        prompt = f"""
+Ты - опытный пентестер. Проанализируй результат сканирования и определи что дальше делать.
+
+ИНСТРУМЕНТ: {tool}
+ЦЕЛЬ: {target}
+ВЫВОД:
+{output[:2000]}
+
+Проанализируй и верни JSON:
+{{
+  "success": true/false,
+  "issue": "описание проблемы если есть",
+  "reason": "почему не сработало",
+  "recommendation": "что делать дальше",
+  "next_tool": "какой инструмент попробовать (nmap/sqlmap/whatweb/nikto/gobuster или null)",
+  "new_flags": "новые флаги если нужны или null",
+  "should_retry": true/false,
+  "user_message": "что сказать пользователю"
+}}
+
+Возможные проблемы:
+- HTTP 403/401 - доступ запрещен
+- "no forms found" - нет форм
+- timeout - долгое выполнение
+- "does not appear to be injectable" - цель не уязвима
+- пустой вывод
+- ошибка подключения
+
+Если цель не уязвима (нет SQL, все порты закрыты и т.д.) - скажи честно в "user_message".
+"""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model="deepseek/deepseek-v4-flash",
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=500,
+                temperature=0.7
+            )
+            text = response.choices[0].message.content.strip()
+            
+            # Извлекаем JSON
+            match = re.search(r'\{.*\}', text, flags=re.S)
+            if match:
+                analysis = json.loads(match.group(0))
+                return analysis
+        except Exception as e:
+            print(f"{Colors.RED}Ошибка анализа: {e}{Colors.END}")
+        
+        return {
+            "success": False,
+            "issue": "Не смог анализировать",
+            "should_retry": False,
+            "user_message": "Не удалось анализировать результат"
+        }
+    
+    def execute_with_adaptation(self, tool: str, target: str, initial_flags: str = "") -> Tuple[bool, str]:
+        """Запустить инструмент с адаптацией к результатам"""
+        
+        current_flags = initial_flags
+        
+        while self.attempt < self.max_attempts:
+            self.attempt += 1
+            UI.info(f"🔄 Попытка {self.attempt}/{self.max_attempts}")
+            
+            # Запускаем инструмент
+            if tool == "nmap":
+                result = run_nmap(target, current_flags)
+            elif tool == "sqlmap":
+                result = run_sqlmap(target, current_flags)
+            elif tool == "whatweb":
+                result = run_whatweb(target)
+            elif tool == "nikto":
+                result = run_nikto(target)
+            else:
+                return False, "Неизвестный инструмент"
+            
+            # Анализируем результат через AI
+            analysis = self.analyze_result_with_ai(tool, result["output"], target)
+            
+            # Выводим сообщение AI
+            if analysis.get("user_message"):
+                print(f"\n{Colors.CYAN}{Colors.ICON_ANALYSIS} {analysis['user_message']}{Colors.END}")
+            
+            # Проверяем было ли успехом
+            if analysis.get("success"):
+                UI.success(f"{tool.upper()} выполнен успешно")
+                return True, result["output"]
+            
+            # Если нет рекомендаций или исчерпаны попытки
+            if not analysis.get("should_retry") or self.attempt >= self.max_attempts:
+                if analysis.get("next_tool"):
+                    UI.warning(f"Текущий инструмент не помог. Попробуем {analysis['next_tool']}")
+                    return False, result["output"]  # Передаём флаг что нужно переключиться
+                else:
+                    return False, result["output"]
+            
+            # Если нужна переб попытка с новыми флагами
+            if analysis.get("new_flags"):
+                current_flags = analysis["new_flags"]
+                UI.info(f"Пробую с новыми флагами: {current_flags}")
+                continue
+            
+            # Иначе выходим
+            break
+        
+        return False, "Исчерпаны попытки"
+
+# ============================================================
 # АНАЛИЗ НАМЕРЕНИЙ
 # ============================================================
 
@@ -978,46 +1104,47 @@ class JimAgent:
         UI.header(intent["explanation"], Colors.ICON_ANALYSIS)
         UI.info(f"🎯 Цель: {intent['target']}")
         
-        results = []
-        total_tools = len(intent["tools"])
+        # АДАПТИВНОЕ СКАНИРОВАНИЕ С DEEPSEEK АНАЛИЗОМ
+        adaptive = AdaptiveScanner(self.client, SYSTEM_PROMPT)
+        tools_to_scan = list(intent["tools"])
         
-        for i, tool in enumerate(intent["tools"]):
+        while tools_to_scan:
+            tool = tools_to_scan[0]
+            
             if self.paused:
                 UI.warning("Сессия приостановлена. Введите /continue")
                 break
             
-            self.session.update_progress(i, total_tools)
-            self.session.print_status()
-            
-            # Проверка для sqlmap
+            # Проверка для sqlmap без параметров
             if tool == "sqlmap" and not intent["has_params"]:
                 UI.warning("В URL нет параметров! sqlmap может быть не эффективен.")
                 if not self.auto_mode:
                     resp = input(f"{Colors.YELLOW}Продолжить? (y/n): {Colors.END}").strip().lower()
                     if resp != 'y':
+                        tools_to_scan.pop(0)
                         continue
             
             UI.info(f"🔧 Запускаю {tool.upper()}...")
             
+            # Запускаем с адаптацией
+            success, output = adaptive.execute_with_adaptation(tool, intent["target"], intent["context_keywords"])
+            
+            # Анализируем результат
             if tool == "nmap":
-                result = run_nmap(intent["target"], intent["context_keywords"])
-                analysis = OutputAnalyzer.analyze_nmap(result["output"])
+                analysis = OutputAnalyzer.analyze_nmap(output)
             elif tool == "sqlmap":
-                result = run_sqlmap(intent["target"], intent["context_keywords"])
-                analysis = OutputAnalyzer.analyze_sqlmap(result["output"])
+                analysis = OutputAnalyzer.analyze_sqlmap(output)
             elif tool == "whatweb":
-                result = run_whatweb(intent["target"])
-                analysis = OutputAnalyzer.analyze_whatweb(result["output"])
+                analysis = OutputAnalyzer.analyze_whatweb(output)
             elif tool == "gobuster":
-                result = run_gobuster(intent["target"])
-                analysis = OutputAnalyzer.analyze_gobuster(result["output"])
+                analysis = OutputAnalyzer.analyze_gobuster(output)
             elif tool == "nikto":
-                result = run_nikto(intent["target"])
-                analysis = OutputAnalyzer.analyze_nikto(result["output"])
+                analysis = OutputAnalyzer.analyze_nikto(output)
             else:
+                tools_to_scan.pop(0)
                 continue
             
-            self.session.add_result(tool, analysis, result.get("duration", 0))
+            self.session.add_result(tool, analysis, 0)
             
             # Вывод анализа
             print(f"\n{Colors.BOLD}{Colors.CYAN}{'─' * 70}{Colors.END}")
@@ -1035,17 +1162,16 @@ class JimAgent:
                 print(f"   • {detail}")
             
             # Критическая находка - остановка
-            if tool == "sqlmap" and analysis.get("found"):
-                UI.warning("🚨 КРИТИЧЕСКАЯ УЯЗВИМОСТЬ! Дальнейшее сканирование остановлено.")
-                break
+            if success and analysis.get("found"):
+                UI.success("🎯 УЯЗВИМОСТЬ НАЙДЕНА!")
+                if tool == "sqlmap":
+                    UI.warning("🚨 КРИТИЧЕСКАЯ! SQL-инъекция подтверждена!")
+                    break
+            
+            tools_to_scan.pop(0)
+            adaptive.attempt = 0  # Сброс для следующего инструмента
         
-        self.session.update_progress(total_tools, total_tools)
         self.session.print_report()
-        
-        # Предложение других целей
-        other_targets = [t for t in self.context_targets if t != intent["target"]]
-        if other_targets:
-            UI.info(f"Другие цели: {', '.join(other_targets[:2])}")
         
         return "✅ Готово"
     
