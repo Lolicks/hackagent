@@ -665,34 +665,10 @@ class AdaptiveScanner:
         """DeepSeek анализирует вывод инструмента и принимает решение"""
         
         prompt = f"""
-Ты - опытный пентестер. Проанализируй результат сканирования и определи что дальше делать.
-
 ИНСТРУМЕНТ: {tool}
 ЦЕЛЬ: {target}
 ВЫВОД:
 {output[:2000]}
-
-Проанализируй и верни JSON:
-{{
-  "success": true/false,
-  "issue": "описание проблемы если есть",
-  "reason": "почему не сработало",
-  "recommendation": "что делать дальше",
-  "next_tool": "какой инструмент попробовать (nmap/sqlmap/whatweb/nikto/gobuster или null)",
-  "new_flags": "новые флаги если нужны или null",
-  "should_retry": true/false,
-  "user_message": "что сказать пользователю"
-}}
-
-Возможные проблемы:
-- HTTP 403/401 - доступ запрещен
-- "no forms found" - нет форм
-- timeout - долгое выполнение
-- "does not appear to be injectable" - цель не уязвима
-- пустой вывод
-- ошибка подключения
-
-Если цель не уязвима (нет SQL, все порты закрыты и т.д.) - скажи честно в "user_message".
 """
         
         try:
@@ -1048,15 +1024,7 @@ class JimAgent:
         if self.context_targets:
             target_context = f"\nСохранённые цели из истории: {', '.join(self.context_targets[-3:])}"
         
-        prompt = (
-            f"Запрос пользователя:\n{user_input}{target_context}\n"
-            f"\nПроанализируй:\n"
-            f"1. Есть ли в запросе ошибка (SQL, HTTP, сеть)?\n"
-            f"2. Есть ли URL или IP адрес?\n"
-            f"3. Какой инструмент нужен?\n"
-            f"4. Какие флаги подходят для этой ошибки/цели?\n"
-            f"\nВозвращай JSON с полями: intent, target, has_params, tools, explanation, context_keywords"
-        )
+        prompt = f"Запрос пользователя:\n{user_input}{target_context}\n"
 
         try:
             response = self.client.chat.completions.create(
