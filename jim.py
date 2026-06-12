@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Jim - Умный ИИ-агент для пентеста
-Сам анализирует цель и решает, какие утилиты запускать
+Сам анализирует цель и решает, какие утилиты и с какими флагами запускать
 Промпт загружается из system_prompt.txt
 """
 
@@ -81,6 +81,7 @@ class Colors:
     ICON_SUCCESS = "✅"
     ICON_ERROR = "❌"
     ICON_WARNING = "⚠️"
+    ICON_FLAG = "⚙️"
 
 # ============================================================
 # ЗАГРУЗКА НАСТРОЕК
@@ -111,11 +112,93 @@ API_KEY = load_api_key()
 SYSTEM_PROMPT = load_system_prompt()
 
 # ============================================================
+# УМНЫЙ ВЫБОР ФЛАГОВ
+# ============================================================
+
+def get_nmap_flags(target: str, context: str = "") -> str:
+    """Умный выбор флагов для nmap в зависимости от ситуации"""
+    flags = "-sV --open"  # Базовые флаги: версии сервисов, только открытые порты
+    
+    if "все порты" in context.lower() or "full" in context.lower() or "все порты" in context.lower():
+        flags = "-sV -p- --open"  # Все порты
+        print(f"{Colors.ICON_FLAG} {Colors.CYAN}Режим: сканирование ВСЕХ портов{Colors.END}")
+    elif "быстрый" in context.lower() or "quick" in context.lower():
+        flags = "-F --open"  # Быстрое сканирование (топ 100 портов)
+        print(f"{Colors.ICON_FLAG} {Colors.CYAN}Режим: быстрое сканирование{Colors.END}")
+    elif "агрессивный" in context.lower() or "aggressive" in context.lower():
+        flags = "-sV -sC -O --open"  # Агрессивное: версии, скрипты, ОС
+        print(f"{Colors.ICON_FLAG} {Colors.CYAN}Режим: агрессивное сканирование{Colors.END}")
+    
+    return flags
+
+def get_sqlmap_flags(url: str, context: str = "") -> str:
+    """Умный выбор флагов для sqlmap в зависимости от ситуации"""
+    flags = "--batch --dbs --level=1"  # Базовые: автоматический режим, базы данных, уровень 1
+    
+    if "полный" in context.lower() or "full" in context.lower() or "все базы" in context.lower():
+        flags = "--batch --dbs --tables --level=3 --risk=2"
+        print(f"{Colors.ICON_FLAG} {Colors.CYAN}Режим: полное сканирование (все базы + таблицы){Colors.END}")
+    elif "быстрый" in context.lower() or "quick" in context.lower():
+        flags = "--batch --current-db --level=1"
+        print(f"{Colors.ICON_FLAG} {Colors.CYAN}Режим: быстрое сканирование (только текущая БД){Colors.END}")
+    elif "os-shell" in context.lower():
+        flags = "--batch --os-shell"
+        print(f"{Colors.ICON_FLAG} {Colors.RED}Режим: ОПАСНО - попытка получить OS shell{Colors.END}")
+    elif "waf" in context.lower():
+        flags = "--batch --dbs --level=3 --risk=2 --random-agent --tamper=space2comment"
+        print(f"{Colors.ICON_FLAG} {Colors.YELLOW}Режим: обход WAF{Colors.END}")
+    
+    return flags
+
+def get_gobuster_flags(url: str, context: str = "") -> str:
+    """Умный выбор флагов для gobuster в зависимости от ситуации"""
+    wordlist = "/usr/share/wordlists/dirb/common.txt"
+    flags = f"dir -u {url} -w {wordlist}"
+    
+    if "большой" in context.lower() or "big" in context.lower() or "глубокий" in context.lower():
+        wordlist = "/usr/share/wordlists/dirb/big.txt"
+        flags = f"dir -u {url} -w {wordlist}"
+        print(f"{Colors.ICON_FLAG} {Colors.CYAN}Режим: большой словарь{Colors.END}")
+    elif "расширение" in context.lower() or "extension" in context.lower():
+        flags = f"dir -u {url} -w {wordlist} -x php,txt,html,asp,aspx"
+        print(f"{Colors.ICON_FLAG} {Colors.CYAN}Режим: поиск с расширениями{Colors.END}")
+    
+    return flags
+
+def get_nikto_flags(target: str, context: str = "") -> str:
+    """Умный выбор флагов для nikto в зависимости от ситуации"""
+    flags = f"-h {target}"
+    
+    if "ssl" in context.lower() or "https" in context.lower():
+        flags = f"-h {target} -ssl"
+        print(f"{Colors.ICON_FLAG} {Colors.CYAN}Режим: SSL/HTTPS{Colors.END}")
+    elif "агрессивный" in context.lower() or "aggressive" in context.lower():
+        flags = f"-h {target} -maxtime=600"
+        print(f"{Colors.ICON_FLAG} {Colors.CYAN}Режим: агрессивное сканирование{Colors.END}")
+    
+    return flags
+
+def get_whatweb_flags(target: str, context: str = "") -> str:
+    """Умный выбор флагов для whatweb в зависимости от ситуации"""
+    flags = target
+    
+    if "подробный" in context.lower() or "verbose" in context.lower():
+        flags = f"-v {target}"
+        print(f"{Colors.ICON_FLAG} {Colors.CYAN}Режим: подробный вывод{Colors.END}")
+    elif "агрессивный" in context.lower() or "aggressive" in context.lower():
+        flags = f"-a 3 {target}"
+        print(f"{Colors.ICON_FLAG} {Colors.CYAN}Режим: агрессивный (больше плагинов){Colors.END}")
+    
+    return flags
+
+# ============================================================
 # ЗАПУСК УТИЛИТ
 # ============================================================
 
-def run_command(cmd: str, timeout: int = 300):
+def run_command(cmd: str, timeout: int = 300, show_flags: bool = True):
     """Запускает команду и возвращает вывод"""
+    if show_flags:
+        print(f"{Colors.ICON_FLAG} {Colors.DIM}Команда: {cmd}{Colors.END}")
     print(f"{Colors.DIM}{'─' * 70}{Colors.END}")
     
     try:
@@ -152,20 +235,40 @@ def run_command(cmd: str, timeout: int = 300):
     except Exception as e:
         return {"success": False, "output": "", "error": str(e)}
 
-def run_nmap(target: str, flags: str = "-sV --open"):
-    return run_command(f"nmap {flags} {target}", timeout=300)
+def run_nmap(target: str, flags: str = None, context: str = ""):
+    if flags is None:
+        flags = get_nmap_flags(target, context)
+    cmd = f"nmap {flags} {target}"
+    print(f"{Colors.ICON_TOOL} {Colors.PURPLE}Запуск nmap с флагами:{Colors.END} {Colors.YELLOW}{flags}{Colors.END}")
+    return run_command(cmd, timeout=300)
 
-def run_sqlmap(url: str, flags: str = "--batch --dbs --level=1"):
-    return run_command(f"sqlmap -u '{url}' {flags}", timeout=600)
+def run_sqlmap(url: str, flags: str = None, context: str = ""):
+    if flags is None:
+        flags = get_sqlmap_flags(url, context)
+    cmd = f"sqlmap -u '{url}' {flags}"
+    print(f"{Colors.ICON_TOOL} {Colors.PURPLE}Запуск sqlmap с флагами:{Colors.END} {Colors.YELLOW}{flags}{Colors.END}")
+    return run_command(cmd, timeout=600)
 
-def run_gobuster(url: str, wordlist: str = "/usr/share/wordlists/dirb/common.txt"):
-    return run_command(f"gobuster dir -u {url} -w {wordlist}", timeout=300)
+def run_gobuster(url: str, flags: str = None, context: str = ""):
+    if flags is None:
+        flags = get_gobuster_flags(url, context)
+    cmd = f"gobuster {flags}"
+    print(f"{Colors.ICON_TOOL} {Colors.PURPLE}Запуск gobuster с флагами:{Colors.END} {Colors.YELLOW}{flags}{Colors.END}")
+    return run_command(cmd, timeout=300)
 
-def run_nikto(target: str):
-    return run_command(f"nikto -h {target}", timeout=600)
+def run_nikto(target: str, flags: str = None, context: str = ""):
+    if flags is None:
+        flags = get_nikto_flags(target, context)
+    cmd = f"nikto {flags}"
+    print(f"{Colors.ICON_TOOL} {Colors.PURPLE}Запуск nikto с флагами:{Colors.END} {Colors.YELLOW}{flags}{Colors.END}")
+    return run_command(cmd, timeout=600)
 
-def run_whatweb(target: str):
-    return run_command(f"whatweb {target}", timeout=120)
+def run_whatweb(target: str, flags: str = None, context: str = ""):
+    if flags is None:
+        flags = get_whatweb_flags(target, context)
+    cmd = f"whatweb {flags}"
+    print(f"{Colors.ICON_TOOL} {Colors.PURPLE}Запуск whatweb с флагами:{Colors.END} {Colors.YELLOW}{flags}{Colors.END}")
+    return run_command(cmd, timeout=120)
 
 # ============================================================
 # АНАЛИЗ ВЫВОДА
@@ -246,32 +349,27 @@ TOOLS = [
     {"type": "function", "function": {
         "name": "run_nmap",
         "description": "Сканирование портов. Используй первым при тестировании IP/домена",
-        "parameters": {"type": "object", "properties": {"target": {"type": "string"}, "flags": {"type": "string", "default": "-sV --open"}}, "required": ["target"]}
+        "parameters": {"type": "object", "properties": {"target": {"type": "string"}, "flags": {"type": "string", "default": ""}, "context": {"type": "string", "default": ""}}, "required": ["target"]}
     }},
     {"type": "function", "function": {
         "name": "run_sqlmap",
-        "description": "Поиск SQL-инъекций. Используй ТОЛЬКО если в URL есть параметры (?id=1)",
-        "parameters": {"type": "object", "properties": {"url": {"type": "string"}, "flags": {"type": "string", "default": "--batch --dbs --level=1"}}, "required": ["url"]}
+        "description": "Поиск SQL-инъекций. Используй ТОЛЬКО если в URL есть параметры",
+        "parameters": {"type": "object", "properties": {"url": {"type": "string"}, "flags": {"type": "string", "default": ""}, "context": {"type": "string", "default": ""}}, "required": ["url"]}
     }},
     {"type": "function", "function": {
         "name": "run_gobuster",
-        "description": "Поиск директорий. Используй если нужно найти скрытые пути",
-        "parameters": {"type": "object", "properties": {"url": {"type": "string"}, "wordlist": {"type": "string", "default": "/usr/share/wordlists/dirb/common.txt"}}, "required": ["url"]}
+        "description": "Поиск директорий",
+        "parameters": {"type": "object", "properties": {"url": {"type": "string"}, "flags": {"type": "string", "default": ""}, "context": {"type": "string", "default": ""}}, "required": ["url"]}
     }},
     {"type": "function", "function": {
         "name": "run_nikto",
-        "description": "Поиск веб-уязвимостей. Используй для общего сканирования сайта",
-        "parameters": {"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]}
+        "description": "Поиск веб-уязвимостей",
+        "parameters": {"type": "object", "properties": {"target": {"type": "string"}, "flags": {"type": "string", "default": ""}, "context": {"type": "string", "default": ""}}, "required": ["target"]}
     }},
     {"type": "function", "function": {
         "name": "run_whatweb",
-        "description": "Определение технологий. Используй чтобы узнать CMS, сервер, фреймворки",
-        "parameters": {"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]}
-    }},
-    {"type": "function", "function": {
-        "name": "analyze_output",
-        "description": "Анализирует вывод утилиты и извлекает важную информацию",
-        "parameters": {"type": "object", "properties": {"tool": {"type": "string"}, "output": {"type": "string"}}, "required": ["tool", "output"]}
+        "description": "Определение технологий",
+        "parameters": {"type": "object", "properties": {"target": {"type": "string"}, "flags": {"type": "string", "default": ""}, "context": {"type": "string", "default": ""}}, "required": ["target"]}
     }}
 ]
 
@@ -279,33 +377,29 @@ def execute_tool(tool_name: str, params: dict) -> str:
     """Выполняет инструмент и возвращает результат"""
     
     if tool_name == "run_nmap":
-        result = run_nmap(params["target"], params.get("flags", "-sV --open"))
+        result = run_nmap(params["target"], params.get("flags", None), params.get("context", ""))
         analysis = analyze_output("nmap", result["output"])
         return json.dumps({"success": result["success"], "output": result["output"][:3000], "analysis": analysis}, ensure_ascii=False)
     
     elif tool_name == "run_sqlmap":
-        result = run_sqlmap(params["url"], params.get("flags", "--batch --dbs --level=1"))
+        result = run_sqlmap(params["url"], params.get("flags", None), params.get("context", ""))
         analysis = analyze_output("sqlmap", result["output"])
         return json.dumps({"success": result["success"], "output": result["output"][:3000], "analysis": analysis}, ensure_ascii=False)
     
     elif tool_name == "run_gobuster":
-        result = run_gobuster(params["url"], params.get("wordlist", "/usr/share/wordlists/dirb/common.txt"))
+        result = run_gobuster(params["url"], params.get("flags", None), params.get("context", ""))
         analysis = analyze_output("gobuster", result["output"])
         return json.dumps({"success": result["success"], "output": result["output"][:3000], "analysis": analysis}, ensure_ascii=False)
     
     elif tool_name == "run_nikto":
-        result = run_nikto(params["target"])
+        result = run_nikto(params["target"], params.get("flags", None), params.get("context", ""))
         analysis = analyze_output("nikto", result["output"])
         return json.dumps({"success": result["success"], "output": result["output"][:3000], "analysis": analysis}, ensure_ascii=False)
     
     elif tool_name == "run_whatweb":
-        result = run_whatweb(params["target"])
+        result = run_whatweb(params["target"], params.get("flags", None), params.get("context", ""))
         analysis = analyze_output("whatweb", result["output"])
         return json.dumps({"success": result["success"], "output": result["output"][:3000], "analysis": analysis}, ensure_ascii=False)
-    
-    elif tool_name == "analyze_output":
-        analysis = analyze_output(params["tool"], params["output"])
-        return json.dumps(analysis, ensure_ascii=False)
     
     return json.dumps({"error": f"Неизвестный инструмент: {tool_name}"})
 
@@ -397,6 +491,7 @@ def main():
     print_banner()
     print(f"{Colors.ICON_AGENT} {Colors.GREEN}Jim готов!{Colors.END}")
     print(f"{Colors.ICON_INFO} Промпт загружен{Colors.END}")
+    print(f"{Colors.ICON_FLAG} Умный выбор флагов в зависимости от ситуации{Colors.END}")
     print(f"{Colors.DIM}{'─' * 70}{Colors.END}")
     
     agent = JimAgent()
