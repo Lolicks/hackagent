@@ -254,8 +254,8 @@ def load_api_key():
 
 def load_system_prompt():
     prompt_paths = [
-        os.path.expanduser("~/.jim/system_prompt.txt"),
-        os.path.join(os.getcwd(), "system_prompt.txt")
+        os.path.join(os.getcwd(), "system_prompt.txt"),
+        os.path.expanduser("~/.jim/system_prompt.txt")
     ]
     for prompt_path in prompt_paths:
         if os.path.exists(prompt_path):
@@ -662,15 +662,8 @@ class AdaptiveScanner:
         self.max_attempts = 3
     
     def analyze_result_with_ai(self, tool: str, output: str, target: str) -> Dict:
-        """DeepSeek анализирует вывод инструмента и принимает решение"""
-        
-        prompt = f"""
-ИНСТРУМЕНТ: {tool}
-ЦЕЛЬ: {target}
-ВЫВОД:
-{output[:2000]}
-"""
-        
+        """DeepSeek анализирует вывод инструмента и возвращает структурированный результат."""
+        prompt = f"{tool}\n{target}\n{output[:2000]}"
         try:
             response = self.client.chat.completions.create(
                 model="deepseek/deepseek-v4-flash",
@@ -682,26 +675,42 @@ class AdaptiveScanner:
                 temperature=0.7
             )
             text = response.choices[0].message.content.strip()
-            
-            # Извлекаем JSON
             match = re.search(r'\{.*\}', text, flags=re.S)
             if match:
                 analysis = json.loads(match.group(0))
-                return analysis
+                if isinstance(analysis, dict):
+                    analysis.setdefault("parsed", True)
+                    return analysis
         except Exception as e:
             print(f"{Colors.RED}Ошибка анализа: {e}{Colors.END}")
-        
+
         return {
             "success": False,
-            "issue": "Не смог анализировать",
+            "parsed": False,
+            "found": False,
+            "summary": "",
+            "details": [],
+            "insights": [],
             "should_retry": False,
-            "user_message": "Не удалось анализировать результат"
+            "user_message": "Не удалось проанализировать вывод инструмента"
         }
     
-    def execute_with_adaptation(self, tool: str, target: str, initial_flags: str = "") -> Tuple[bool, str]:
+    def execute_with_adaptation(self, tool: str, target: str, initial_flags: str = "") -> Tuple[bool, str, Dict]:
         """Запустить инструмент с адаптацией к результатам"""
         
         current_flags = initial_flags
+        analysis = {
+            "success": False,
+            "parsed": False,
+            "found": False,
+            "summary": "",
+            "details": [],
+            "insights": [],
+            "should_retry": False,
+            "new_flags": "",
+            "next_tool": "",
+            "user_message": ""
+        }
         
         while self.attempt < self.max_attempts:
             self.attempt += 1
@@ -714,10 +723,12 @@ class AdaptiveScanner:
                 result = run_sqlmap(target, current_flags)
             elif tool == "whatweb":
                 result = run_whatweb(target)
+            elif tool == "gobuster":
+                result = run_gobuster(target)
             elif tool == "nikto":
                 result = run_nikto(target)
             else:
-                return False, "Неизвестный инструмент"
+                return False, "Неизвестный инструмент", analysis
             
             # Анализируем результат через AI
             analysis = self.analyze_result_with_ai(tool, result["output"], target)
@@ -729,15 +740,15 @@ class AdaptiveScanner:
             # Проверяем было ли успехом
             if analysis.get("success"):
                 UI.success(f"{tool.upper()} выполнен успешно")
-                return True, result["output"]
+                return True, result["output"], analysis
             
             # Если нет рекомендаций или исчерпаны попытки
             if not analysis.get("should_retry") or self.attempt >= self.max_attempts:
                 if analysis.get("next_tool"):
                     UI.warning(f"Текущий инструмент не помог. Попробуем {analysis['next_tool']}")
-                    return False, result["output"]  # Передаём флаг что нужно переключиться
+                    return False, result["output"], analysis
                 else:
-                    return False, result["output"]
+                    return False, result["output"], analysis
             
             # Если нужна переб попытка с новыми флагами
             if analysis.get("new_flags"):
@@ -748,7 +759,7 @@ class AdaptiveScanner:
             # Иначе выходим
             break
         
-        return False, "Исчерпаны попытки"
+        return False, result.get("output", ""), analysis
 
 # ============================================================
 # АНАЛИЗ НАМЕРЕНИЙ
@@ -1095,22 +1106,30 @@ class JimAgent:
             UI.info(f"🔧 Запускаю {tool.upper()}...")
             
             # Запускаем с адаптацией
-            success, output = adaptive.execute_with_adaptation(tool, intent["target"], intent["context_keywords"])
+            success, output, ai_analysis = adaptive.execute_with_adaptation(tool, intent["target"], intent["context_keywords"])
             
-            # Анализируем результат
-            if tool == "nmap":
-                analysis = OutputAnalyzer.analyze_nmap(output)
-            elif tool == "sqlmap":
-                analysis = OutputAnalyzer.analyze_sqlmap(output)
-            elif tool == "whatweb":
-                analysis = OutputAnalyzer.analyze_whatweb(output)
-            elif tool == "gobuster":
-                analysis = OutputAnalyzer.analyze_gobuster(output)
-            elif tool == "nikto":
-                analysis = OutputAnalyzer.analyze_nikto(output)
+            # Если DeepSeek смог разобрать вывод, используем его как первичную аналитику.
+            if ai_analysis.get("parsed"):
+                analysis = {
+                    "found": bool(ai_analysis.get("found", False)),
+                    "summary": ai_analysis.get("summary", ""),
+                    "details": ai_analysis.get("details", []),
+                    "insights": ai_analysis.get("insights", []),
+                }
             else:
-                tools_to_scan.pop(0)
-                continue
+                if tool == "nmap":
+                    analysis = OutputAnalyzer.analyze_nmap(output)
+                elif tool == "sqlmap":
+                    analysis = OutputAnalyzer.analyze_sqlmap(output)
+                elif tool == "whatweb":
+                    analysis = OutputAnalyzer.analyze_whatweb(output)
+                elif tool == "gobuster":
+                    analysis = OutputAnalyzer.analyze_gobuster(output)
+                elif tool == "nikto":
+                    analysis = OutputAnalyzer.analyze_nikto(output)
+                else:
+                    tools_to_scan.pop(0)
+                    continue
             
             self.session.add_result(tool, analysis, 0)
             
