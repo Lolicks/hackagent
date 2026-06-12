@@ -199,7 +199,7 @@ def analyze_output(tool: str, output: str):
             # Ищем базы данных
             dbs = re.findall(r'\[\*\*\]\s+(\w+)', output)
             if dbs:
-                analysis["details"].append(f"Базы данных: {', '.join(dbs[:5])")
+                analysis["details"].append(f"Базы данных: {', '.join(dbs[:5])}")
         else:
             analysis["summary"] = "SQL-инъекция не обнаружена"
     
