@@ -1162,68 +1162,125 @@ class JimAgent:
         return ("", "")
     
     def _handle_command(self, command: str) -> str:
-        """Обрабатывает интерактивные команды"""
-        cmd = command.lower().strip('/')
+    """Обрабатывает интерактивные команды"""
+    cmd = command.lower().strip('/')
+    
+    if cmd in ["status", "stats"]:
+        if self.session:
+            self.session.print_status()
+            return ""
+        return "ℹ️ No active session. Start by providing a target (IP or URL)."
+    
+    elif cmd in ["stop", "pause"]:
+        if self.session:
+            self.session.paused = True
+            return "⏸️ Session paused. Type 'continue' to resume"
+        return "ℹ️ No active session to pause"
+    
+    elif cmd in ["continue", "resume"]:
+        if self.session:
+            self.session.paused = False
+            return "▶️ Session resumed"
+        return "ℹ️ No active session to resume"
+    
+    elif cmd in ["report", "summary"]:
+        if self.session:
+            self.session.print_final_report()
+            return ""
+        return "ℹ️ No active session. Start scanning first."
+    
+    elif cmd in ["save", "export"]:
+        if self.session:
+            self.session._save_session()
+            return f"💾 Session saved to ~/.jim/sessions/{self.session.session_id}/"
+        return "ℹ️ No active session to save"
+    
+    elif cmd in ["history", "log"]:
+        if self.session:
+            if not self.session.scan_history:
+                return "📋 No scans performed yet in this session"
+            print(f"\n{Colors.BOLD}📋 Scan History:{Colors.END}")
+            for i, scan in enumerate(self.session.scan_history, 1):
+                status_icon = Colors.ICON_SUCCESS if scan.status == ScanStatus.COMPLETED else Colors.ICON_ERROR
+                status_color = Colors.GREEN if scan.status == ScanStatus.COMPLETED else Colors.RED
+                print(f"  {i}. {status_icon} {status_color}{scan.tool.upper()}{Colors.END} - {scan.duration:.1f}s")
+                if scan.analysis.get("summary"):
+                    print(f"     └─ {scan.analysis['summary'][:60]}")
+            return ""
+        return "ℹ️ No session history"
+    
+    elif cmd in ["reset", "clear_memory", "forget", "clear"]:
+        """Полная очистка памяти агента"""
+        # Очищаем историю сообщений
+        self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         
-        if cmd in ["status", "stats"]:
-            if self.session:
-                self.session.print_status()
-                return ""
-            return "No active session"
+        # Очищаем текущую сессию
+        if self.session:
+            self.session = None
         
-        elif cmd in ["stop", "pause"]:
-            if self.session:
-                self.session.paused = True
-                return "⏸️ Session paused. Type 'continue' to resume"
-            return "No active session"
+        # Сбрасываем глобальное состояние
+        global interrupted, current_process
+        interrupted = False
+        if current_process:
+            try:
+                current_process.terminate()
+                current_process = None
+            except:
+                pass
         
-        elif cmd in ["continue", "resume"]:
-            if self.session:
-                self.session.paused = False
-                return "▶️ Session resumed"
-            return "No active session"
+        # Очищаем экран (опционально)
+        if 'clear_screen' in cmd or command.endswith(' screen'):
+            os.system('clear')
+            print_banner()
         
-        elif cmd in ["report", "summary"]:
-            if self.session:
-                self.session.print_final_report()
-                return ""
-            return "No active session"
-        
-        elif cmd in ["save", "export"]:
-            if self.session:
-                self.session._save_session()
-                return f"💾 Session saved to ~/.jim/sessions/{self.session.session_id}/"
-            return "No active session"
-        
-        elif cmd in ["history", "log"]:
-            if self.session:
-                print(f"\n{Colors.BOLD}📋 Scan History:{Colors.END}")
-                for i, scan in enumerate(self.session.scan_history, 1):
-                    status_icon = Colors.ICON_SUCCESS if scan.status == ScanStatus.COMPLETED else Colors.ICON_ERROR
-                    print(f"  {i}. {status_icon} {scan.tool} - {scan.duration:.1f}s")
-                return ""
-            return "No active session"
-        
-        elif cmd in ["help", "?"]:
-            return """
+        return """
+╔════════════════════════════════════════════════════════════════════╗
+║                    🧹 MEMORY RESET COMPLETE 🧹                      ║
+╠════════════════════════════════════════════════════════════════════╣
+║                                                                    ║
+║  ✅ Conversation history cleared                                   ║
+║  ✅ Session context cleared                                        ║
+║  ✅ Active scans stopped (if any)                                  ║
+║  ✅ Agent memory reset to factory state                            ║
+║                                                                    ║
+║  ℹ️ Jim is now fresh and ready for new targets!                   ║
+║                                                                    ║
+║  💡 Tip: Use /help to see all commands                            ║
+║                                                                    ║
+╚════════════════════════════════════════════════════════════════════╝
+"""
+    
+    elif cmd in ["help", "?"]:
+        return """
 ╔════════════════════════════════════════════════════════════════════╗
 ║                      INTERACTIVE COMMANDS                          ║
 ╠════════════════════════════════════════════════════════════════════╣
 ║                                                                    ║
-║  /status, /stats   - Show current session status                  ║
-║  /stop, /pause     - Pause current scan                           ║
-║  /continue, /resume- Resume paused scan                           ║
-║  /report, /summary - Show final report                            ║
-║  /save, /export    - Save current session                         ║
-║  /history, /log    - Show scan history                            ║
-║  /help, /?         - Show this help                               ║
-║  /exit, /quit      - Exit Jim                                     ║
+║  SESSION CONTROL:                                                 ║
+║    /status, /stats   - Show current session status                ║
+║    /stop, /pause     - Pause current scan                         ║
+║    /continue, /resume- Resume paused scan                         ║
+║    /reset, /clear    - Clear ALL memory and context               ║
+║    /reset screen     - Clear memory AND screen                    ║
+║                                                                    ║
+║  REPORTING:                                                       ║
+║    /report, /summary - Show final report                          ║
+║    /save, /export    - Save current session                       ║
+║    /history, /log    - Show scan history                          ║
+║                                                                    ║
+║  OTHER:                                                           ║
+║    /help, /?         - Show this help                             ║
+║    /exit, /quit      - Exit Jim                                   ║
+║                                                                    ║
+║  💡 Examples:                                                     ║
+║    > Scan website example.com for vulnerabilities                 ║
+║    > Aggressive nmap on 192.168.1.1                              ║
+║    > Test SQL on site.com/page?id=1                              ║
 ║                                                                    ║
 ╚════════════════════════════════════════════════════════════════════╝
 """
-        
-        return f"Unknown command: {command}. Type /help for available commands"
-
+    
+    return f"❌ Unknown command: {command}. Type /help for available commands"
 # ============================================================
 # ЗАПУСК
 # ============================================================
